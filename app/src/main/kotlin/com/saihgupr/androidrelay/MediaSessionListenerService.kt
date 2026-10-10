@@ -5,6 +5,8 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Build
+import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.util.Log
 import org.json.JSONObject
@@ -15,6 +17,10 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
     private val controllers = mutableMapOf<String, MediaController>()
     private val callbacks = mutableMapOf<String, MediaController.Callback>()
     private val lastPublishedPayloads = mutableMapOf<String, String>()
+    // 每个包名最近一次收到媒体事件的 SystemClock.elapsedRealtime(),用作"最近活跃会话"排序依据
+    private val lastEventAt = mutableMapOf<String, Long>()
+    // 应用显示名缓存,避免每次回调都查 PackageManager
+    private val appLabels = mutableMapOf<String, String>()
     private lateinit var mqttClient: MqttRelay
 
     override fun onCreate() {
@@ -38,6 +44,15 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         updateActiveSessions(activeControllers)
     }
 
+    // API 24+ 回调:系统可能主动解绑监听(如内存紧张),必须 requestRebind 才能恢复。
+    // minSdk 21,需要版本守卫;方法本身在 API < 24 的设备上永远不会被调用。
+    override fun onListenerDisconnected() {
+        Log.w(TAG, "Listener disconnected, requesting rebind")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            requestRebind(ComponentName(this, MediaSessionListenerService::class.java))
+        }
+    }
+
     private fun updateActiveSessions(activeControllers: List<MediaController>?) {
         val activePackages = activeControllers?.map { it.packageName }?.toSet() ?: emptySet()
         Log.d(TAG, "Active packages: $activePackages")
@@ -47,9 +62,9 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         while (iterator.hasNext()) {
             val (pkg, controller) = iterator.next()
             if (pkg !in activePackages) {
-                controller.unregisterCallback(callbacks[pkg]!!)
-                callbacks.remove(pkg)
+                unregisterQuietly(pkg, controller)
                 lastPublishedPayloads.remove(pkg)
+                lastEventAt.remove(pkg)
                 iterator.remove()
             }
         }
@@ -65,21 +80,79 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
                     override fun onMetadataChanged(metadata: MediaMetadata?) {
                         reportState(controller)
                     }
+
+                    override fun onSessionDestroyed() {
+                        Log.d(TAG, "Session destroyed: $pkg")
+                        cleanupSession(pkg, controller)
+                    }
                 }
                 controller.registerCallback(callback)
                 controllers[pkg] = controller
                 callbacks[pkg] = callback
-                
+
                 // Initial report
                 reportState(controller)
             }
         }
+
+        logSelectedLanSession()
+    }
+
+    /**
+     * 会话被应用主动销毁时的清理:仅注销回调并移除内部状态。
+     * MQTT 保持既有行为(销毁不触发发布),避免影响现有 Home Assistant 语义。
+     */
+    private fun cleanupSession(pkg: String, controller: MediaController) {
+        unregisterQuietly(pkg, controller)
+        callbacks.remove(pkg)
+        controllers.remove(pkg)
+        lastPublishedPayloads.remove(pkg)
+        lastEventAt.remove(pkg)
+        logSelectedLanSession()
+    }
+
+    /** 注销回调,吞掉"回调已注销/会话已失效"类异常,保证清理路径不抛错。 */
+    private fun unregisterQuietly(pkg: String, controller: MediaController) {
+        val callback = callbacks[pkg] ?: return
+        try {
+            controller.unregisterCallback(callback)
+        } catch (e: Exception) {
+            Log.w(TAG, "Unregister callback failed for $pkg: ${e.message}")
+        }
+        callbacks.remove(pkg)
+    }
+
+    /**
+     * 选择 LAN 通道当前应跟随的会话并输出日志。
+     * 阶段 1 仅用于日志观察;阶段 2 的 LanPushManager 复用同一选择逻辑。
+     * 过滤列表暂为空(黑/白名单随 LAN 设置一并引入)。
+     */
+    private fun logSelectedLanSession() {
+        val candidates = controllers.map { (pkg, controller) ->
+            SessionSelector.Candidate(
+                packageName = pkg,
+                isPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING,
+                lastActiveAt = lastEventAt[pkg] ?: 0L
+            )
+        }
+        val selected = SessionSelector.select(candidates)
+        Log.d(TAG, "LAN active session: ${selected?.packageName ?: "none"} (candidates=${candidates.map { it.packageName }})")
     }
 
     private fun reportState(controller: MediaController) {
+        val pkg = controller.packageName
+        lastEventAt[pkg] = SystemClock.elapsedRealtime()
+
+        // ---- 完整媒体信息(LAN 通道数据源,阶段 1 仅日志;MQTT 行为保持不变)----
+        val info = MediaMetadataReader.read(controller, appLabel(pkg))
+        if (info != null) {
+            Log.d(TAG, "MediaInfo[$pkg]: $info")
+        }
+
+        // ---- 原有 MQTT 上报逻辑(保持原字段与去重行为,勿改)----
         val playbackState = controller.playbackState
         val metadata = controller.metadata
-        
+
         val stateStr = when (playbackState?.state) {
             PlaybackState.STATE_PLAYING -> "playing"
             PlaybackState.STATE_PAUSED -> "paused"
@@ -111,6 +184,21 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
 
         Log.d(TAG, "Reporting: $payload")
         mqttClient.publish(null, payload)
+    }
+
+    /**
+     * 取应用显示名并缓存;查询失败(包被卸载/受限配置文件等)回落为包名本身。
+     */
+    private fun appLabel(pkg: String): String {
+        appLabels[pkg]?.let { return it }
+        return try {
+            val label = packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+            appLabels[pkg] = label
+            label
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot resolve app label for $pkg: ${e.message}")
+            pkg
+        }
     }
 
     override fun onDestroy() {
