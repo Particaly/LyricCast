@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/@ztools-center/ztools-api-types/resource/ztools.schema.json",
+  "name": "lan-lyrics",
+  "title": "LAN 歌词",
+  "description": "手机正在播放 → 局域网推送 → 实时滚动歌词(基于 android_relay)",
+  "author": "J.S.Patrick",
+  "version": "0.1.0",
+  "main": "dist/index.html",
+  "preload": "preload/server.js",
+  "logo": "logo.png",
+  "development": {
+    "main": "http://localhost:5173"
+  },
+  "pluginSetting": {
+    "backgroundRunning": true
+  },
+  "features": [
+    {
+      "code": "lyrics",
+      "explain": "实时歌词:手机在局域网推送正在播放的歌曲",
+      "icon": "logo.png",
+      "cmds": ["歌词", "lyrics"]
+    }
+  ]
+}
