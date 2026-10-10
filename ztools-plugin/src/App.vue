@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { activeArtwork, activeState, initStore, ui } from './store'
+import Lyrics from './components/Lyrics.vue'
 
 /** 协议状态 → 中文展示 */
 const STATE_TEXT: Record<string, string> = {
@@ -220,6 +221,9 @@ onUnmounted(() => {
       <h2>正在播放</h2>
       <div class="muted">暂无播放信息 —— 手机端开启 LAN Push 并连接后自动显示</div>
     </section>
+
+    <!-- 歌词(滚动 / 纯文本 / 降级) -->
+    <Lyrics v-if="activeState" :position-ms="positionKnown ? positionMs : -1" />
   </div>
 </template>
 
