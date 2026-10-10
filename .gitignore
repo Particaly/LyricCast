@@ -22,3 +22,6 @@ captures/
 *.dex
 *.class
 .git-backup-*
+
+# Node / tools
+node_modules/

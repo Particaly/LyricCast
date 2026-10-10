@@ -22,6 +22,8 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
     // 应用显示名缓存,避免每次回调都查 PackageManager
     private val appLabels = mutableMapOf<String, String>()
     private lateinit var mqttClient: MqttRelay
+    // LAN 推送通道(独立于 MQTT 的开关、缓存与连接管理)
+    private var lanPushManager: LanPushManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -29,6 +31,7 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         mediaSessionManager = getSystemService(MEDIA_SESSION_SERVICE) as MediaSessionManager
         mqttClient = MqttRelay(this)
         mqttClient.connect()
+        lanPushManager = LanPushManager(this).also { it.start() }
     }
 
     override fun onListenerConnected() {
@@ -143,10 +146,11 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         val pkg = controller.packageName
         lastEventAt[pkg] = SystemClock.elapsedRealtime()
 
-        // ---- 完整媒体信息(LAN 通道数据源,阶段 1 仅日志;MQTT 行为保持不变)----
+        // ---- 完整媒体信息(LAN 通道数据源;MQTT 行为保持不变)----
         val info = MediaMetadataReader.read(controller, appLabel(pkg))
         if (info != null) {
             Log.d(TAG, "MediaInfo[$pkg]: $info")
+            lanPushManager?.onMediaInfo(info, controller)
         }
 
         // ---- 原有 MQTT 上报逻辑(保持原字段与去重行为,勿改)----
@@ -204,6 +208,8 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
     override fun onDestroy() {
         super.onDestroy()
         mediaSessionManager.removeOnActiveSessionsChangedListener(this)
+        lanPushManager?.shutdown()
+        lanPushManager = null
         mqttClient.disconnect()
     }
 
