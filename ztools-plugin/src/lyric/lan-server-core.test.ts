@@ -2,7 +2,7 @@
  * PC 端插值计算测试:直接驱动 preload/lan-server-core.js(CommonJS),
  * 用 getPosition 的注入时钟做确定性断言(协议 §5)。
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -206,5 +206,28 @@ describe('LanServerCore v1.1 (protocol §2.8/§2.9/§6)', () => {
     expect(isAppStale(device, 1_000 + 24_001)).toBe(true)
     device.lastState = { ...seqState(1), playback: { ...baseState.playback, state: 'paused', speed: 0 } }
     expect(isAppStale(device, 1_000 + 999_999)).toBe(false)
+  })
+})
+
+// 回归:ad6b851 曾把周期定时器改名为调用不存在的 _tick,每 5s 抛 Uncaught TypeError
+// (真实线上故障)。_startTimers 必须不抛错,且唯一周期回调是 _pingAll。
+describe('_startTimers watchdog 回归', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('只挂 ping 定时器且不抛错', () => {
+    vi.useFakeTimers()
+    const core = new LanServerCore({ port: 0, token: 'token-token-token-1234' })
+    const spy = vi.spyOn(core as any, '_pingAll').mockImplementation(() => {})
+    expect(() => (core as any)._startTimers()).not.toThrow()
+    // 旧 _tick 周期(5s)内不得触发任何回调
+    vi.advanceTimersByTime(5_000)
+    expect(spy).not.toHaveBeenCalled()
+    // 10s(任务书 ping 周期)时 _pingAll 到点
+    vi.advanceTimersByTime(5_000)
+    expect(spy).toHaveBeenCalledTimes(1)
+    ;(core as any)._timers.forEach(clearInterval)
+    spy.mockRestore()
   })
 })

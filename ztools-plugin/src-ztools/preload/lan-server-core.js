@@ -400,7 +400,8 @@ class LanServerCore {
   }
 
   _startTimers() {
-    this._timers.push(setInterval(() => this._tick(), WATCHDOG_INTERVAL_MS))
+    // 唯一的周期任务:ping/pong 判死 + 墓碑清理(职责全在 _pingAll,
+    // 10s 节奏相对 45s 判死阈值足够);不要在此调用不存在的方法
     this._timers.push(setInterval(() => this._pingAll(), PC_PING_INTERVAL_MS))
   }
 
@@ -464,6 +465,5 @@ class LanServerCore {
   }
 }
 
-const WATCHDOG_INTERVAL_MS = 5_000
 
 module.exports = { LanServerCore, PROTOCOL_V, isAppStale, PC_PING_INTERVAL_MS, PONG_DEAD_MS, LAPSE_GRACE_MS }
