@@ -12,7 +12,7 @@
 import { fetchJson } from '../fetcher'
 import { pickBestWithScore, type Candidate } from '../match'
 import { buildQueryVariants } from '../query-variants'
-import type { LyricProvider, LyricQuery, LyricResult } from '../types'
+import type { LyricProvider, LyricQuery, LyricResult, ProviderOutcome } from '../types'
 
 const TIMEOUT_MS = 5_000
 const MAX_SEARCH_REQUESTS = 3
@@ -66,7 +66,7 @@ function songToCandidate(song: NeteaseSong): Candidate {
 export const neteaseProvider: LyricProvider = {
   name: 'netease',
 
-  async search(query: LyricQuery, signal: AbortSignal): Promise<LyricResult | null> {
+  async search(query: LyricQuery, signal: AbortSignal): Promise<ProviderOutcome> {
     const variants = buildQueryVariants(query)
     if (variants.length === 0) return null
 
@@ -88,7 +88,7 @@ export const neteaseProvider: LyricProvider = {
         break // 命中即停
       }
     }
-    if (!best || typeof best.id !== 'number') return null
+    if (!best || typeof best.id !== 'number') return { status: 'not_found' }
 
     const lyricResult = (await fetchJson(
       `https://music.163.com/api/song/lyric?${new URLSearchParams({
@@ -103,10 +103,10 @@ export const neteaseProvider: LyricProvider = {
     const synced = lyricResult?.lrc?.lyric?.trim() || null
     const translation = lyricResult?.tlyric?.lyric?.trim() || null
     // 无时间轴也无纯文本 → 未命中
-    if (!synced) return null
+    if (!synced) return { status: 'not_found' }
     // 网易云对"没有歌词"的歌也返回时间轴空壳(只有元数据行),
-    // 交给解析层/展示层判断行数(阶段 2 起在 isUsableSynced 前过滤元数据行)
-    return { synced, plain: null, translation, source: 'netease' }
+    // parseLrc 已在开头区域过滤制作信息行,isUsableSynced 据此判定可用性
+    return { status: 'found', result: { synced, plain: null, translation, source: 'netease' } }
   }
 }
 

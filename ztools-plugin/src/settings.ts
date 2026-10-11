@@ -26,6 +26,12 @@ export interface Settings {
   desktopWidth: number
   /** 桌面歌词胶囊高度(px;悬浮窗高 = 胶囊高 + 上下各 5px 透明留白) */
   desktopHeight: number
+  /** 歌词来源:LRCLIB(主源)开关 */
+  providerLrclib: boolean
+  /** 歌词来源:网易云(中文回退)开关 */
+  providerNetease: boolean
+  /** 并行请求各来源(时间预算模式);关闭退化为按路由顺序串行 */
+  parallelProviders: boolean
   /** 主界面滚动歌词字号(px) */
   mainFontSize: number
   /** 主界面歌词是否显示翻译 */
@@ -42,6 +48,9 @@ export const DESKTOP_SIZE_RANGE = { minWidth: 360, maxWidth: 1600, minHeight: 96
 export const MAIN_FONT_RANGE = { min: 12, max: 30 }
 
 const DEFAULTS: Settings = {
+  providerLrclib: true,
+  providerNetease: true,
+  parallelProviders: true,
   desktopEnabled: false,
   desktopFontSize: 26,
   desktopTheme: 'auto',
@@ -69,6 +78,10 @@ function sanitize(raw: unknown): Settings {
     return Number.isNaN(n) ? fallback : Math.min(max, Math.max(min, n))
   }
   return {
+    providerLrclib: typeof input.providerLrclib === 'boolean' ? input.providerLrclib : DEFAULTS.providerLrclib,
+    providerNetease: typeof input.providerNetease === 'boolean' ? input.providerNetease : DEFAULTS.providerNetease,
+    parallelProviders:
+      typeof input.parallelProviders === 'boolean' ? input.parallelProviders : DEFAULTS.parallelProviders,
     desktopEnabled: typeof input.desktopEnabled === 'boolean' ? input.desktopEnabled : DEFAULTS.desktopEnabled,
     desktopFontSize: clamp(input.desktopFontSize, DESKTOP_FONT_RANGE.min, DESKTOP_FONT_RANGE.max, DEFAULTS.desktopFontSize),
     desktopTheme:

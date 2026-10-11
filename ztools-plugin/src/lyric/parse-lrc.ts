@@ -18,6 +18,20 @@ const WORD_TAG = /<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g
 const OFFSET_TAG = /^\s*\[offset:\s*([+-]?\d+)\s*\]/im
 
 /**
+ * 元数据行(作词/作曲/编曲/混音等)判定:关键词 + 全/半角冒号 + 短内容。
+ * 只在歌词开头区域生效(见 isMetadataLineAt 的使用方式),避免误删正文中
+ * 恰好含"作词"二字的正常歌词。
+ */
+const METADATA_KEYWORD =
+  /^(?:作词|作詞|作曲|编曲|編曲|填词|填詞|填曲|制作|製作|制作人|製作人|监制|監製|混音|母带|母帶|和声|和聲|录音|錄音|和音|OP|SP|Lyricist|Lyrics(\s+by)?|Composer|Composed(\s+by)?|Arranger|Producer|Produced(\s+by)?|Mixed(\s+by)?|Mastered(\s+by)?)\s*[:：]/i
+const METADATA_MAX_CHARS = 50
+
+function isMetadataText(text: string): boolean {
+  const trimmed = text.trim()
+  return trimmed.length > 0 && trimmed.length <= METADATA_MAX_CHARS && METADATA_KEYWORD.test(trimmed)
+}
+
+/**
  * 解析 LRC 文本。非法输入(空串/无时间戳)返回 lines=[],调用方按"解析失败"处理。
  *
  * @param lrc LRC 原文
@@ -55,6 +69,9 @@ export function parseLrc(lrc: string): ParsedLyrics {
     if (stamps.length === 0) continue // 元数据行/空行
 
     const text = line.slice(lastTagEnd).trim()
+    // 开头区域的"作词:xxx"等制作信息行不进入歌词体(保证 isUsableSynced 的
+    // 行数/跨度统计和渲染都不受空壳元数据干扰);一旦出现正式歌词行即停止过滤
+    if (result.lines.length === 0 && isMetadataText(text)) continue
     for (const raw of stamps) {
       const timeMs = raw - result.offsetTagMs
       const key = `${timeMs}|${text}`
@@ -100,7 +117,10 @@ export function lrcToPlain(lrc: string): string {
       .replace(WORD_TAG, '')
       .replace(/^(\s*\[[^\]]*\])+\s*/, '')
       .trim()
-    if (text) lines.push(text)
+    if (!text) continue
+    // 开头区域过滤"作词:xxx"制作信息,与 parseLrc 行为一致
+    if (lines.length === 0 && isMetadataText(text)) continue
+    lines.push(text)
   }
   // 相邻去重:同一句被多时间戳标记时只保留一次
   const result: string[] = []

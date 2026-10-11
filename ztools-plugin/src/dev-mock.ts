@@ -4,7 +4,7 @@
  * ZTools 内(preload 已提供 services)与生产构建不受任何影响。
  */
 import type { ProtocolStateMessage, ServerEvent } from './env.d'
-import type { LyricProvider, LyricResult } from './lyric/types'
+import type { LyricProvider, ProviderOutcome } from './lyric/types'
 
 const MOCK_LRC = [
   '[offset:0]',
@@ -137,8 +137,11 @@ function emitArtwork(): void {
 
 const mockProvider: LyricProvider = {
   name: 'dev-mock',
-  async search(): Promise<LyricResult | null> {
-    return { synced: MOCK_LRC, plain: null, translation: MOCK_TRANSLATION, source: 'dev-mock' }
+  async search(): Promise<ProviderOutcome> {
+    return {
+      status: 'found',
+      result: { synced: MOCK_LRC, plain: null, translation: MOCK_TRANSLATION, source: 'dev-mock' }
+    }
   }
 }
 

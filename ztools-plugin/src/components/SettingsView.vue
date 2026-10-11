@@ -273,6 +273,55 @@ function regenerateToken() {
         <div class="divider"></div>
         <div class="setting-row">
           <div class="setting-label">
+            <div class="setting-title">歌词来源</div>
+            <div class="setting-hint">按查询语言自动排序(中文优先中文源);出错的来源会自动熔断 5 分钟</div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">LRCLIB(主源)</div>
+            <div class="setting-hint">公开歌词库,英文/多语种覆盖最好</div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.providerLrclib"
+              @change="updateSettings({ providerLrclib: ($event.target as HTMLInputElement).checked })"
+            />
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">网易云音乐(中文回退)</div>
+            <div class="setting-hint">非官方接口,可能随时变动;失败自动回退不影响其他来源</div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.providerNetease"
+              @change="updateSettings({ providerNetease: ($event.target as HTMLInputElement).checked })"
+            />
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">并行搜索所有来源</div>
+            <div class="setting-hint">同时请求各来源,高置信结果立即返回;关闭则按顺序逐个尝试</div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.parallelProviders"
+              @change="updateSettings({ parallelProviders: ($event.target as HTMLInputElement).checked })"
+            />
+            <span class="track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-label">
             <div class="setting-title">歌词校准</div>
             <div class="setting-hint">
               歌词与进度对不齐时微调;当前生效 {{ formatOffset(userOffset) }}

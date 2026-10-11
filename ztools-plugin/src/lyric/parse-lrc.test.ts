@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findActiveLine, parseLrc } from './parse-lrc'
+import { findActiveLine, isUsableSynced, lrcToPlain, parseLrc } from './parse-lrc'
 
 describe('parseLrc', () => {
   it('parses two-digit and three-digit millisecond stamps', () => {
@@ -43,6 +43,34 @@ describe('parseLrc', () => {
   it('returns empty lines for garbage input', () => {
     expect(parseLrc('').lines).toEqual([])
     expect(parseLrc('plain text only').lines).toEqual([])
+  })
+})
+
+
+describe('元数据行过滤(任务 2.5)', () => {
+  it('开头区域的"作词/作曲"行不进入歌词体', () => {
+    const parsed = parseLrc('[00:00.50]作词 : 周杰伦\n[00:00.60]作曲 : 周杰伦\n[00:01.00]第一句\n[00:12.00]第二句')
+    expect(parsed.lines.map((l) => l.text)).toEqual(['第一句', '第二句'])
+  })
+
+  it('全角冒号与英文关键词同样过滤', () => {
+    const parsed = parseLrc('[00:00.10]Lyrics by: Someone\n[00:00.20]编曲:Another\n[00:01.00]la')
+    expect(parsed.lines.map((l) => l.text)).toEqual(['la'])
+  })
+
+  it('正式歌词出现后的同类行不误删(保守:仅限开头区域)', () => {
+    const parsed = parseLrc('[00:01.00]雨下了一整夜\n[00:12.00]作词:周杰伦\n[00:30.00]第二句')
+    expect(parsed.lines.map((l) => l.text)).toEqual(['雨下了一整夜', '作词:周杰伦', '第二句'])
+  })
+
+  it('元数据空壳歌词被判为不可用(网易云无歌词场景)', () => {
+    const shell = '[00:00.50]作词 : 张三\n[00:00.60]作曲 : 李四\n[00:00.70]混音:王五'
+    expect(isUsableSynced(shell)).toBe(false)
+    expect(parseLrc(shell).lines).toEqual([])
+  })
+
+  it('lrcToPlain 同样滤除开头制作信息', () => {
+    expect(lrcToPlain('[00:00.50]作词 : 张三\n[00:01.00]第一句')).toBe('第一句')
   })
 })
 

@@ -16,7 +16,7 @@ import { OffsetStore, type OffsetScope } from './lyric/offsets'
 import { createMemoryStorage, type KVStorage } from './lyric/cache'
 import { lrclibProvider } from './lyric/providers/lrclib'
 import { neteaseProvider } from './lyric/providers/netease'
-import { loadSettings } from './settings'
+import { loadSettings, settings } from './settings'
 
 export interface ArtworkEntry {
   mime: string
@@ -101,11 +101,17 @@ function storageAdapter(): KVStorage {
 /** dev 浏览器预览(dev-mock.ts)注入的本地歌词源;ZTools 内不存在 */
 const devProvider = (window as any)?.__devLyricProvider as LyricProvider | undefined
 
+// 路由由 LyricsManager 内部完成(查询以 CJK 为主时网易云优先,否则保持此声明顺序)。
+// 来源开关与并行模式接 settings,设置页可实时切换。
 const lyricManager = new LyricsManager({
   storage: storageAdapter(),
-  // LRCLIB 主源在前,网易云为中文回退源;任一失败自动走下一个。
-  // 优先取带有效时间轴的结果(synced-first 两轮回退见 lyrics-manager.ts)。
-  providers: devProvider ? [devProvider, lrclibProvider, neteaseProvider] : [lrclibProvider, neteaseProvider]
+  providers: devProvider ? [devProvider, lrclibProvider, neteaseProvider] : [lrclibProvider, neteaseProvider],
+  parallel: () => settings.parallelProviders,
+  isProviderEnabled: (name) => {
+    if (name === lrclibProvider.name) return settings.providerLrclib
+    if (name === neteaseProvider.name) return settings.providerNetease
+    return true
+  }
 })
 export const offsetStore = new OffsetStore(storageAdapter())
 

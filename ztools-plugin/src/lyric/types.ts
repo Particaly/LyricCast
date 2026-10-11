@@ -31,18 +31,32 @@ export interface LyricResult {
   source: string
 }
 
-/** 歌词数据源接口:实现方自行处理搜索→详情两步,失败时抛异常 */
+/** 歌词数据源接口:实现方自行处理搜索→详情两步,失败以 error 结果返回 */
 export interface LyricProvider {
   /** 来源标识(写入 LyricResult.source) */
   name: string
+  /** 中文优先源(路由排序用:查询以 CJK 为主时排到最前) */
+  prefersCjk?: boolean
   /**
    * 查询歌词。
-   * @param query 查询参数(已清洗)
-   * @param signal 取消信号:切歌时中止在途请求
-   * @returns 命中返回结果;确认无歌词返回 null;网络/接口错误抛异常
+   * @param query 查询参数(已清洗,含 rawTitle/versionTags 等)
+   * @param signal 取消信号:切歌时中止在途请求(中止以 AbortError 抛出,由编排层识别)
+   * @returns 显式区分 found / not_found / error(决定负缓存是否可写)
    */
-  search(query: LyricQuery, signal: AbortSignal): Promise<LyricResult | null>
+  search(query: LyricQuery, signal: AbortSignal): Promise<ProviderOutcome>
 }
+
+/**
+ * Provider 的一次查询结果(显式区分"没有"与"出错"):
+ * - found:命中(score 为本源最佳候选打分,供并行模式置信度判定与跨源择优);
+ * - not_found:接口明确无结果/无合格候选(可参与负缓存判定);
+ * - error:超时、网络错误、5xx、429、解析失败(本次不得写负缓存)。
+ * 切歌导致的 abort 以异常(AbortError)形式抛出,不属于以上任何一种。
+ */
+export type ProviderOutcome =
+  | { status: 'found'; result: LyricResult; score?: number }
+  | { status: 'not_found' }
+  | { status: 'error'; message: string }
 
 /** 解析后的一行歌词;timeMs 已应用 [offset:] 标签,未应用用户手动偏移 */
 export interface LyricsLine {

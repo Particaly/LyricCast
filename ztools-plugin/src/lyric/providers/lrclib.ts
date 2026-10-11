@@ -8,7 +8,7 @@
 import { fetchJson } from '../fetcher'
 import { pickBestWithScore, type Candidate } from '../match'
 import { buildQueryVariants } from '../query-variants'
-import type { LyricProvider, LyricQuery, LyricResult } from '../types'
+import type { LyricProvider, LyricQuery, LyricResult, ProviderOutcome } from '../types'
 
 const BASE = 'https://lrclib.net/api'
 const TIMEOUT_MS = 5_000
@@ -57,7 +57,7 @@ function toCandidate(record: LrcLibRecord): Candidate {
 export const lrclibProvider: LyricProvider = {
   name: 'lrclib',
 
-  async search(query: LyricQuery, signal: AbortSignal): Promise<LyricResult | null> {
+  async search(query: LyricQuery, signal: AbortSignal): Promise<ProviderOutcome> {
     const variants = buildQueryVariants(query)
     if (variants.length === 0) return null
 
@@ -81,7 +81,7 @@ export const lrclibProvider: LyricProvider = {
     try {
       const record = (await fetchJson(`${BASE}/get?${toQuery(getParams)}`, { headers, signal })) as LrcLibRecord
       const result = recordToResult(record)
-      if (result) return result
+      if (result) return { status: 'found', result }
     } catch (err) {
       if (signal.aborted) throw err
       // 404 等:走模糊搜索
@@ -110,11 +110,12 @@ export const lrclibProvider: LyricProvider = {
         const candidates = records.map(toCandidate)
         const best = pickBestWithScore(candidates, query)
         if (!best) continue
-        return recordToResult(best.candidate as LrcLibRecord)
+        const result = recordToResult(best.candidate as LrcLibRecord)
+        if (result) return { status: 'found', result, score: best.score }
       }
       if (requests >= MAX_REQUESTS) break
     }
-    return null
+    return { status: 'not_found' }
   }
 }
 
