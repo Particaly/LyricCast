@@ -18,7 +18,6 @@
  * 稳定性:非官方保证,随时可能变更;失败由上层静默回退。
  */
 import { fetchJson } from '../fetcher'
-import { settings } from '../../settings'
 import type { LyricProvider, LyricQuery, LyricResult, ProviderOutcome } from '../types'
 
 const BASE = 'https://lyrics-api.boidu.dev'
@@ -111,36 +110,6 @@ interface BetterLyricsResponse {
   ttml?: string
 }
 
-/**
- * 识别浏览器插件导出的"签名身份"JSON(形如 {version, keyId, publicKey, privateKey}),
- * 从中提取 keyId。注意:这份导出是 Unison 众包贡献的 ECDSA 签名身份,
- * **不是** lyrics API 的 X-API-Key(服务端是字符串比对,公共实例的 key 官方当前
- * 不发放);提取 keyId 只是"值得试一试"的启发式,401 时仍按未命中静默跳过。
- * @returns 提取到的 keyId;不是导出 JSON 返回 null(调用方按纯 key 字符串处理)
- */
-export function parseBetterLyricsExport(text: string): string | null {
-  const trimmed = (text ?? '').trim()
-  if (!trimmed.startsWith('{')) return null
-  try {
-    const parsed = JSON.parse(trimmed) as { version?: unknown; keyId?: unknown; privateKey?: unknown }
-    if (
-      parsed?.version === 1 &&
-      typeof parsed.keyId === 'string' &&
-      /^[0-9a-f]{64}$/.test(parsed.keyId) &&
-      typeof parsed.privateKey === 'object' &&
-      parsed.privateKey !== null
-    ) {
-      return parsed.keyId
-    }
-  } catch (_) { /* 非 JSON,按纯字符串处理 */ }
-  return null
-}
-
-/** 读取设置里的 API key(空串 = 不带头);独立函数便于测试打桩 */
-function currentApiKey(): string {
-  return (settings.betterLyricsApiKey ?? '').trim()
-}
-
 function toQuery(params: Record<string, string>): string {
   return new URLSearchParams(params).toString()
 }
@@ -157,13 +126,9 @@ export const betterLyricsProvider: LyricProvider = {
     const durationSec = query.durationMs > 0 ? Math.round(query.durationMs / 1000) : undefined
     if (durationSec) params.d = String(durationSec)
 
-    const headers = { ...HEADERS }
-    const apiKey = currentApiKey()
-    if (apiKey) headers['X-API-Key'] = apiKey // 服务端为纯字符串比对;无效 key 仅 401(按未命中跳过)
-
     let payload: BetterLyricsResponse
     try {
-      payload = (await fetchJson(`${BASE}/getLyrics?${toQuery(params)}`, { headers, signal })) as BetterLyricsResponse
+      payload = (await fetchJson(`${BASE}/getLyrics?${toQuery(params)}`, { headers: HEADERS, signal })) as BetterLyricsResponse
     } catch (err) {
       if (signal.aborted) throw err
       const message = (err as Error)?.message ?? ''

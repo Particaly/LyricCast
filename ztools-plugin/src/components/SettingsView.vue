@@ -16,7 +16,6 @@ import {
 } from '../settings'
 import { resetDesktopPosition } from '../desktop-bridge'
 import { buildPairingPayload } from '../qr/pair-qr'
-import { parseBetterLyricsExport } from '../lyric/providers/betterlyrics'
 
 // ===== 桌面歌词 =====
 const THEME_OPTIONS: Array<{ value: DesktopTheme; label: string }> = [
@@ -107,40 +106,6 @@ const qrSvg = computed(() => {
     return ''
   }
 })
-
-// ===== Better Lyrics 密钥导入(浏览器插件导出的签名身份 JSON 或任意 key 字符串) =====
-const blKeyInput = ref('')
-const blKeyTip = ref('')
-
-const blKeyStored = computed(() => {
-  const key = settings.betterLyricsApiKey
-  if (!key) return ''
-  return key.length > 16 ? `${key.slice(0, 12)}…(${key.length} 位)` : key
-})
-
-function importBetterLyricsKey() {
-  const text = blKeyInput.value.trim()
-  if (!text) {
-    blKeyTip.value = '请先粘贴密钥内容'
-    return
-  }
-  const keyId = parseBetterLyricsExport(text)
-  if (keyId) {
-    updateSettings({ betterLyricsApiKey: keyId })
-    blKeyTip.value =
-      '已识别为浏览器插件导出的签名身份,取 keyId 存为密钥。注意:公共实例的 API key 官方暂不发放,' +
-      '未缓存歌曲仍可能 401(热歌不受影响,已进缓存的歌免费读取)'
-  } else {
-    updateSettings({ betterLyricsApiKey: text })
-    blKeyTip.value = `已保存为 API key(${text.length} 位)`
-  }
-  blKeyInput.value = ''
-}
-
-function clearBetterLyricsKey() {
-  updateSettings({ betterLyricsApiKey: '' })
-  blKeyTip.value = '已清除'
-}
 
 // ===== 端口 / Token =====
 const editingPort = ref('')
@@ -382,27 +347,6 @@ function regenerateToken() {
             <span class="track"></span>
           </label>
         </div>
-        <div class="setting-row">
-          <div class="setting-label">
-            <div class="setting-title">Better Lyrics 密钥</div>
-            <div class="setting-hint">
-              粘贴浏览器插件导出的密钥 JSON(自动取 keyId),或直接的 API key 字符串;热歌无需密钥
-              <template v-if="blKeyStored"><br />已存密钥:<span class="mono">{{ blKeyStored }}</span></template>
-            </div>
-          </div>
-          <div class="controls">
-            <input
-              v-model="blKeyInput"
-              class="mono"
-              style="width: 210px"
-              placeholder="粘贴导出 JSON 或 key"
-              spellcheck="false"
-            />
-            <button @click="importBetterLyricsKey">导入</button>
-            <button v-if="settings.betterLyricsApiKey" @click="clearBetterLyricsKey">清除</button>
-          </div>
-        </div>
-        <div v-if="blKeyTip" class="muted hint">{{ blKeyTip }}</div>
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">并行搜索所有来源</div>
