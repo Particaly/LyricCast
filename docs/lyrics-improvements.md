@@ -115,6 +115,25 @@ QQ 音乐需要 sign 计算且接口变化频繁,在无真实联调条件下风�
 - 设计草案:`docs/platform-id-lyrics-design.md`(协议零改动;PC 端
   `LyricQuery.platformId` + `provider.fetchById` 路由设计与负缓存注意点)。
 
+## 增量:新增聚合源与 TTML 源(2026-10-11 第二轮)
+
+- **lrcmux**(`providers/lrcmux.ts`,公开实例 `api.lrcmux.dev`):聚合
+  LRCLIB/Musixmatch/酷狗/Genius/Deezer 等,服务端扇出择优,LRCLIB 搜不到的曲目
+  常能命中。请求 `GET /get?artist&title&album&duration&level=line&format=json`,
+  自转 LRC(词级 `words` 转增强标签,信息保留);命中来源写入
+  `source: "lrcmux:<providerId>"`。404/400(如无 artist)按未命中,429/5xx 按
+  error(不写负缓存)。**无候选列表**(服务端聚合),不出现在"换一个"面板。
+- **Better Lyrics**(`providers/betterlyrics.ts`,`lyrics-api.boidu.dev`):
+  音节级 TTML(开源众包)。`GET /getLyrics?s=&a=&al=&d=` → `{ttml}`;
+  `ttmlToLrc` 把 `<p>/<span>` 转为增强 LRC(行戳 `[mm:ss.xx]` + 词戳
+  `<mm:ss.xx>`,parseLrc 剥离渲染并标记 isEnhanced,未来逐字渲染无需换源)。
+  **公共实例限制**:未缓存的新歌要求 X-API-Key(401)——该源定位为热门歌的
+  TTML 增强;401 不写负缓存(缓存可能随后变热),404 按确认无词。
+- 两者均默认启用、可在设置页关闭、纳入熔断与 RequestSupervisor;解析层用
+  2026-10-11 真实公共实例录制的样例做 fixture 单测(实现当日已对真实 API
+  联调通过:命中/404/400 三条路径)。
+- 逐字渲染仍未实现(行级 + 增强标签保留),与阶段 1 的 isEnhanced 语义一致。
+
 ## 新增配置项(插件设置页「歌词显示」区块)
 
 | 名称 | 默认 | 含义 |
@@ -122,6 +141,8 @@ QQ 音乐需要 sign 计算且接口变化频繁,在无真实联调条件下风�
 | `providerLrclib` | 开 | LRCLIB 主源开关 |
 | `providerNetease` | 开 | 网易云(中文回退,非官方接口)开关 |
 | `providerKugou` | 开 | 酷狗(中文补充,非官方接口)开关 |
+| `providerLrcmux` | 开 | lrcmux 聚合源开关(LRCLIB/Musixmatch/酷狗/Genius 等) |
+| `providerBetterLyrics` | 开 | Better Lyrics(TTML 逐字,未缓存新歌需 API key)开关 |
 | `parallelProviders` | 开 | 并行时间预算模式;关闭退化为按路由顺序串行 |
 
 Android 端新增:`lan_diagnostic_log`(默认关)——媒体会话诊断日志开关。
@@ -149,5 +170,8 @@ Android 端新增:`lan_diagnostic_log`(默认关)——媒体会话诊断日志�
 - [ ] 歌词行与进度对不齐时,设置页 ±100/±500 校准仍然生效;
 - [ ] 设置页逐个关闭来源/并行开关,行为符合预期;连续失败的来源 5 分钟内不再请求;
 - [ ] 酷狗源在真实环境连通(首个中文歌观察 `netease`/`kugou` 来源徽标);
+- [ ] lrcmux:播放一首 LRCLIB 搜不到的歌,观察来源徽标出现 `lrcmux:*`;
+- [ ] Better Lyrics:播放海外热歌,来源徽标 `betterlyrics`,切换展示正常;
+- [ ] 关闭两个新源开关后不再请求(冷门歌观察负缓存行为);
 - [ ] Android:开启「媒体会话诊断日志」,在网易云/QQ 音乐/酷狗各播一首歌,
       `adb logcat -s RelayDiag` 观察 mediaId 是否为平台歌曲 ID,反馈到 issue。

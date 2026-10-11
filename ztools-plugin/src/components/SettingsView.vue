@@ -321,6 +321,34 @@ function regenerateToken() {
         </div>
         <div class="setting-row">
           <div class="setting-label">
+            <div class="setting-title">lrcmux(聚合源)</div>
+            <div class="setting-hint">聚合 LRCLIB/Musixmatch/酷狗/Genius 等,LRCLIB 搜不到时兜底;无候选面板</div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.providerLrcmux"
+              @change="updateSettings({ providerLrcmux: ($event.target as HTMLInputElement).checked })"
+            />
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">Better Lyrics(TTML 逐字)</div>
+            <div class="setting-hint">海外众包歌词 API,热歌命中率高;未缓存的新歌可能要求 API key 而跳过</div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.providerBetterLyrics"
+              @change="updateSettings({ providerBetterLyrics: ($event.target as HTMLInputElement).checked })"
+            />
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
             <div class="setting-title">并行搜索所有来源</div>
             <div class="setting-hint">同时请求各来源,高置信结果立即返回;关闭则按顺序逐个尝试</div>
           </div>

@@ -32,6 +32,10 @@ export interface Settings {
   providerNetease: boolean
   /** 歌词来源:酷狗(中文补充)开关 */
   providerKugou: boolean
+  /** 歌词来源:lrcmux(聚合源,LRCLIB/Musixmatch/酷狗/Genius/Deezer)开关 */
+  providerLrcmux: boolean
+  /** 歌词来源:Better Lyrics(TTML 逐字,热歌缓存命中)开关 */
+  providerBetterLyrics: boolean
   /** 并行请求各来源(时间预算模式);关闭退化为按路由顺序串行 */
   parallelProviders: boolean
   /** 主界面滚动歌词字号(px) */
@@ -53,6 +57,8 @@ const DEFAULTS: Settings = {
   providerLrclib: true,
   providerNetease: true,
   providerKugou: true,
+  providerLrcmux: true,
+  providerBetterLyrics: true,
   parallelProviders: true,
   desktopEnabled: false,
   desktopFontSize: 26,
@@ -84,6 +90,9 @@ function sanitize(raw: unknown): Settings {
     providerLrclib: typeof input.providerLrclib === 'boolean' ? input.providerLrclib : DEFAULTS.providerLrclib,
     providerNetease: typeof input.providerNetease === 'boolean' ? input.providerNetease : DEFAULTS.providerNetease,
     providerKugou: typeof input.providerKugou === 'boolean' ? input.providerKugou : DEFAULTS.providerKugou,
+    providerLrcmux: typeof input.providerLrcmux === 'boolean' ? input.providerLrcmux : DEFAULTS.providerLrcmux,
+    providerBetterLyrics:
+      typeof input.providerBetterLyrics === 'boolean' ? input.providerBetterLyrics : DEFAULTS.providerBetterLyrics,
     parallelProviders:
       typeof input.parallelProviders === 'boolean' ? input.parallelProviders : DEFAULTS.parallelProviders,
     desktopEnabled: typeof input.desktopEnabled === 'boolean' ? input.desktopEnabled : DEFAULTS.desktopEnabled,

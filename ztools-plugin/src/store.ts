@@ -18,6 +18,8 @@ import { createMemoryStorage, type KVStorage } from './lyric/cache'
 import { lrclibProvider } from './lyric/providers/lrclib'
 import { neteaseProvider } from './lyric/providers/netease'
 import { kugouProvider } from './lyric/providers/kugou'
+import { lrcmuxProvider } from './lyric/providers/lrcmux'
+import { betterLyricsProvider } from './lyric/providers/betterlyrics'
 import { loadSettings, settings } from './settings'
 
 export interface ArtworkEntry {
@@ -118,13 +120,15 @@ const devProvider = (window as any)?.__devLyricProvider as LyricProvider | undef
 const lyricManager = new LyricsManager({
   storage: storageAdapter(),
   providers: devProvider
-    ? [devProvider, lrclibProvider, neteaseProvider, kugouProvider]
-    : [lrclibProvider, neteaseProvider, kugouProvider],
+    ? [devProvider, lrclibProvider, neteaseProvider, kugouProvider, lrcmuxProvider, betterLyricsProvider]
+    : [lrclibProvider, neteaseProvider, kugouProvider, lrcmuxProvider, betterLyricsProvider],
   parallel: () => settings.parallelProviders,
   isProviderEnabled: (name) => {
     if (name === lrclibProvider.name) return settings.providerLrclib
     if (name === neteaseProvider.name) return settings.providerNetease
     if (name === kugouProvider.name) return settings.providerKugou
+    if (name === lrcmuxProvider.name) return settings.providerLrcmux
+    if (name === betterLyricsProvider.name) return settings.providerBetterLyrics
     return true
   }
 })
