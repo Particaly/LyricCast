@@ -10,8 +10,10 @@ import { activeArtwork, displayAnchor, initStore, ui } from './store'
 import { renderProgress, type LinkStatus } from './progress'
 import { settings } from './settings'
 import { disableDesktopLyrics, enableDesktopLyrics, notifyStyleChanged } from './desktop-bridge'
+import CandidatePicker from './components/CandidatePicker.vue'
 import Lyrics from './components/Lyrics.vue'
 import SettingsView from './components/SettingsView.vue'
+import { openCandidatePicker } from './store'
 
 /** 协议状态 → 中文展示 */
 const STATE_TEXT: Record<string, string> = {
@@ -211,6 +213,9 @@ onUnmounted(() => {
               <div class="np-tags">
                 <span class="badge">{{ displayState.app.name || displayState.app.package }}</span>
                 <span class="badge" :class="{ warn: offline }">{{ stateBadge }}</span>
+                <button class="badge link" title="手动选择歌词候选" @click="openCandidatePicker">
+                  歌词不对?换一个
+                </button>
               </div>
             </div>
             <div class="np-progress">
@@ -243,6 +248,9 @@ onUnmounted(() => {
       <!-- ===== 设置页 ===== -->
       <SettingsView v-show="tab === 'settings'" />
     </main>
+
+    <!-- 候选面板(任务 3.1):任意页可唤起,覆盖层独立于选项卡 -->
+    <CandidatePicker />
   </div>
 </template>
 
@@ -468,6 +476,20 @@ onUnmounted(() => {
 .badge.warn {
   border-style: dashed;
   color: rgba(255, 255, 255, 0.45);
+}
+
+/* "换一个"入口:徽标外形的幽灵按钮,悬停点亮 */
+.badge.link {
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.badge.link:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
 .np-progress {

@@ -18,7 +18,7 @@ import { cleanArtist, cleanTitleDetailed, parseArtists } from './clean-title'
 import { isUsableSynced, lrcToPlain } from './parse-lrc'
 import { routeProviders } from './provider-router'
 import { ProviderBreaker } from './circuit-breaker'
-import type { LyricProvider, LyricQuery, LyricResult } from './types'
+import type { LyricProvider, LyricQuery, LyricResult, PickerCandidate } from './types'
 
 export interface TrackForLyrics {
   id: string
@@ -97,6 +97,88 @@ export class LyricsManager {
   /** 中止全部在途请求(切歌时由 store 间接触发:下一次 fetch 会先 cancelAll) */
   cancelAll(): void {
     this.supervisor.cancelAll()
+  }
+
+  // ==================== 手动纠错(任务 3.1) ====================
+
+  /**
+   * 候选面板:聚合所有支持 searchCandidates 的来源(路由序,受开关约束)。
+   * 单来源失败静默跳过;全部纳入 RequestSupervisor,切歌即取消。
+   * 不写缓存、不记熔断 —— 面板失败只影响展示。
+   */
+  async fetchCandidates(track: TrackForLyrics): Promise<PickerCandidate[]> {
+    const query = this.buildQuery(track)
+    if (!query.title) return []
+    this.supervisor.cancelAll()
+    const providers = routeProviders(
+      this.providers.filter(
+        (p) => this.isProviderEnabled(p.name) && typeof p.searchCandidates === 'function'
+      ),
+      query
+    )
+    const results = await Promise.allSettled(
+      providers.map(async (provider) => {
+        const controller = this.supervisor.create(this.timeoutMs)
+        try {
+          return await provider.searchCandidates!(query, controller.signal)
+        } catch (err) {
+          if (controller.signal.aborted) return [] as PickerCandidate[]
+          console.warn(`[lyrics] candidates from ${provider.name} failed:`, (err as Error)?.message)
+          return [] as PickerCandidate[]
+        }
+      })
+    )
+    const items: PickerCandidate[] = []
+    for (const entry of results) if (entry.status === 'fulfilled') items.push(...entry.value)
+    return items
+  }
+
+  /**
+   * 固定用户选择:候选自带歌词内容直接采用;仅带 id 的候选按源回取。
+   * 结果经 normalize(伪时间轴降级)后写入缓存并标记 userPinned,
+   * 优先级高于自动匹配,不受 24h 负缓存与自动重匹配影响。
+   */
+  async pinLyrics(track: TrackForLyrics, candidate: PickerCandidate): Promise<LyricResult | null> {
+    const query = this.buildQuery(track)
+    if (!query.title) return null
+    this.supervisor.cancelAll()
+    const controller = this.supervisor.create(this.timeoutMs)
+    try {
+      let raw: LyricResult | null = null
+      if (candidate.synced || candidate.plain) {
+        raw = {
+          synced: candidate.synced ?? null,
+          plain: candidate.plain ?? null,
+          translation: candidate.translation ?? null,
+          source: candidate.source
+        }
+      } else if (candidate.id) {
+        const provider = this.providers.find((p) => p.name === candidate.source)
+        if (provider?.fetchLyricsById) {
+          raw = await provider.fetchLyricsById(candidate.id, query, controller.signal)
+        }
+      }
+      const normalized = this.normalize(raw)
+      if (!normalized) return null
+      this.cache.putPinned(query, normalized, { provider: candidate.source })
+      return normalized
+    } catch (err) {
+      if (controller.signal.aborted) return null
+      console.warn('[lyrics] pin failed:', (err as Error)?.message)
+      return null
+    }
+  }
+
+  /** 恢复自动匹配:清除固定标记(自动路径可重新接管该曲) */
+  async unpinLyrics(track: TrackForLyrics): Promise<void> {
+    const query = this.buildQuery(track)
+    if (query.title) this.cache.unpin(query)
+  }
+
+  /** 当前曲目是否处于固定状态(UI 徽标/恢复入口用) */
+  isPinned(track: TrackForLyrics): boolean {
+    const query = this.buildQuery(track)
+    return !!query.title && this.cache.getPinned(query) !== null
   }
 
   /**

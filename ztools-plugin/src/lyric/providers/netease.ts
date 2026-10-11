@@ -12,7 +12,7 @@
 import { fetchJson } from '../fetcher'
 import { pickBestWithScore, type Candidate } from '../match'
 import { buildQueryVariants } from '../query-variants'
-import type { LyricProvider, LyricQuery, LyricResult, ProviderOutcome } from '../types'
+import type { LyricProvider, LyricQuery, LyricResult, PickerCandidate, ProviderOutcome } from '../types'
 
 const TIMEOUT_MS = 5_000
 const MAX_SEARCH_REQUESTS = 3
@@ -90,15 +90,7 @@ export const neteaseProvider: LyricProvider = {
     }
     if (!best || typeof best.id !== 'number') return { status: 'not_found' }
 
-    const lyricResult = (await fetchJson(
-      `https://music.163.com/api/song/lyric?${new URLSearchParams({
-        id: String(best.id),
-        lv: '1',
-        kv: '1',
-        tv: '-1'
-      })}`,
-      { headers: HEADERS, signal }
-    )) as NeteaseLyricResponse
+    const lyricResult = await fetchLyricById(String(best.id), signal)
 
     const synced = lyricResult?.lrc?.lyric?.trim() || null
     const translation = lyricResult?.tlyric?.lyric?.trim() || null
@@ -107,7 +99,59 @@ export const neteaseProvider: LyricProvider = {
     // 网易云对"没有歌词"的歌也返回时间轴空壳(只有元数据行),
     // parseLrc 已在开头区域过滤制作信息行,isUsableSynced 据此判定可用性
     return { status: 'found', result: { synced, plain: null, translation, source: 'netease' } }
+  },
+
+  /**
+   * 候选面板:搜索结果只带元数据(歌词需按 id 二次请求)。
+   * 顶部按搜索排序截断 20 条;固定时由 fetchLyricsById 回取歌词。
+   */
+  async searchCandidates(query: LyricQuery, signal: AbortSignal): Promise<PickerCandidate[]> {
+    const variants = buildQueryVariants(query)
+    const songs: NeteaseSong[] = []
+    for (const variant of variants) {
+      const keyword = `${variant.title} ${variant.artist}`.trim()
+      if (!keyword) continue
+      const searchResult = (await fetchJson(searchUrl(keyword), { headers: HEADERS, signal })) as {
+        result?: { songs?: NeteaseSong[] }
+      }
+      songs.push(...(searchResult?.result?.songs ?? []))
+      if (songs.length > 0) break // 命中即停
+    }
+    return songs.slice(0, 20).map((song) => ({
+      title: song.name,
+      artist: song.artists?.map((a) => a.name).join('/') ?? '',
+      album: song.album?.name,
+      durationMs: song.duration ?? 0,
+      source: 'netease',
+      id: String(song.id)
+    }))
+  },
+
+  /** 按歌曲 id 取歌词(搜索与候选面板共用);无词返回 null */
+  async fetchLyricsById(id: string, _query: LyricQuery, signal: AbortSignal): Promise<LyricResult | null> {
+    const lyricResult = await fetchLyricById(id, signal)
+    const synced = lyricResult?.lrc?.lyric?.trim() || null
+    if (!synced) return null
+    return {
+      synced,
+      plain: null,
+      translation: lyricResult?.tlyric?.lyric?.trim() || null,
+      source: 'netease'
+    }
   }
+}
+
+/** 歌词接口(非官方,可能限流;调用方处理异常) */
+async function fetchLyricById(id: string, signal: AbortSignal): Promise<NeteaseLyricResponse> {
+  return (await fetchJson(
+    `https://music.163.com/api/song/lyric?${new URLSearchParams({
+      id,
+      lv: '1',
+      kv: '1',
+      tv: '-1'
+    })}`,
+    { headers: HEADERS, signal }
+  )) as NeteaseLyricResponse
 }
 
 export const NETEASE_TIMEOUT = TIMEOUT_MS

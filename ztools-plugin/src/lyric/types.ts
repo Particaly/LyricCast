@@ -31,6 +31,22 @@ export interface LyricResult {
   source: string
 }
 
+/** "换一个"候选面板的条目(任务 3.1;仅展示与固定用,不参与自动打分) */
+export interface PickerCandidate {
+  title: string
+  artist: string
+  album?: string
+  durationMs?: number
+  /** 来源标识(与 LyricResult.source 一致,用于按源回取歌词) */
+  source: string
+  /** 供 provider 后续按 id 取词(如网易云;LRCLIB 候选自带内容则无 id) */
+  id?: string
+  /** 直接携带的歌词内容(LRCLIB 搜索结果自带;带其一即"可直接固定") */
+  synced?: string | null
+  plain?: string | null
+  translation?: string | null
+}
+
 /** 歌词数据源接口:实现方自行处理搜索→详情两步,失败以 error 结果返回 */
 export interface LyricProvider {
   /** 来源标识(写入 LyricResult.source) */
@@ -44,6 +60,16 @@ export interface LyricProvider {
    * @returns 显式区分 found / not_found / error(决定负缓存是否可写)
    */
   search(query: LyricQuery, signal: AbortSignal): Promise<ProviderOutcome>
+  /**
+   * 搜索候选列表(手动纠错面板用;不写缓存,请求受 RequestSupervisor 管理)。
+   * 未实现该方法的来源不出现在候选面板里。
+   */
+  searchCandidates?(query: LyricQuery, signal: AbortSignal): Promise<PickerCandidate[]>
+  /**
+   * 按候选 id 回取歌词(候选未自带内容时;失败抛异常由编排层吞掉)。
+   * 返回结果仍会经 normalize 把伪时间轴降级为纯文本。
+   */
+  fetchLyricsById?(id: string, query: LyricQuery, signal: AbortSignal): Promise<LyricResult | null>
 }
 
 /**

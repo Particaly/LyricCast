@@ -6,12 +6,13 @@
  * 进度推算/降级判定在 App.vue 用纯函数完成;断线后保留最后一首歌的信息(标灰)。
  */
 import { reactive, computed, ref } from 'vue'
-import type { LyricProvider } from './lyric/types'
+import type { LyricProvider, PickerCandidate } from './lyric/types'
 import type { ProtocolStateMessage, ServerEvent, LanSnapshot } from './env.d'
 import type { ProgressAnchor } from './progress'
 import { parseLrc } from './lyric/parse-lrc'
 import type { LyricsLine } from './lyric/types'
-import { LyricsManager } from './lyric/lyrics-manager'
+import { LyricsManager, type TrackForLyrics } from './lyric/lyrics-manager'
+import type { LyricResult } from './lyric/types'
 import { OffsetStore, type OffsetScope } from './lyric/offsets'
 import { createMemoryStorage, type KVStorage } from './lyric/cache'
 import { lrclibProvider } from './lyric/providers/lrclib'
@@ -85,7 +86,17 @@ export const lyric = reactive({
   lines: [] as LyricsLine[],
   translationMap: new Map<number, string>(),
   plain: '',
-  notFound: false
+  notFound: false,
+  /** 当前曲目是否被用户固定(userPinned,优先于自动匹配) */
+  pinned: false
+})
+
+/** "换一个"候选面板状态(任务 3.1) */
+export const candidatePicker = reactive({
+  open: false,
+  loading: false,
+  items: [] as PickerCandidate[],
+  error: ''
 })
 
 /** 当前生效的手动偏移(毫秒):正值 = 歌词提前显示 */
@@ -137,12 +148,15 @@ async function fetchLyrics(state: ProtocolStateMessage) {
   lyric.plain = ''
   lyric.source = ''
   lyric.notFound = false
+  lyric.pinned = false
 
   // 偏移:track 记录优先,否则 app 记录
   userOffset.value = offsetStore.effective(trackId, appPackage)
   offsetUi.trackValue = offsetStore.get('track', trackId)
   offsetUi.appValue = offsetStore.get('app', appPackage)
   offsetUi.scope = offsetUi.trackValue !== 0 ? 'track' : 'track'
+
+  lyric.pinned = lyricManager.isPinned({ id: trackId, title: state.track.title ?? '', artist: state.track.artist ?? '', album: state.track.album ?? '', durationMs: state.track.durationMs ?? 0 })
 
   const seq = ++fetchSeq
   const result = await lyricManager.fetchForTrack(
@@ -156,12 +170,95 @@ async function fetchLyrics(state: ProtocolStateMessage) {
     appPackage
   )
   if (seq !== fetchSeq) return // 期间已切歌
-  lyric.loading = false
   if (!result) {
+    lyric.loading = false
     lyric.notFound = true
     return
   }
+  applyLyricResult(result)
+}
+
+/** 当前活跃 state → TrackForLyrics(面板动作与展示共用,避免字段散落) */
+function trackForState(state: ProtocolStateMessage): TrackForLyrics {
+  return {
+    id: state.track.id,
+    title: state.track.title ?? '',
+    artist: state.track.artist ?? '',
+    album: state.track.album ?? '',
+    durationMs: state.track.durationMs ?? 0
+  }
+}
+
+let pickerSeq = 0
+
+/** 打开候选面板并拉取各来源候选(受 RequestSupervisor 管理,切歌自动取消) */
+export function openCandidatePicker(): void {
+  const state = activeState.value
+  if (!state) return
+  candidatePicker.open = true
+  candidatePicker.loading = true
+  candidatePicker.error = ''
+  candidatePicker.items = []
+  const seq = ++pickerSeq
+  lyricManager
+    .fetchCandidates(trackForState(state))
+    .then((items) => {
+      if (seq !== pickerSeq || !candidatePicker.open) return
+      candidatePicker.loading = false
+      candidatePicker.items = items
+      if (items.length === 0) candidatePicker.error = '没有找到候选,换个关键词试试'
+    })
+    .catch(() => {
+      if (seq !== pickerSeq) return
+      candidatePicker.loading = false
+      candidatePicker.error = '候选获取失败'
+    })
+}
+
+/** 关闭候选面板(取消在途候选请求) */
+export function closeCandidatePicker(): void {
+  candidatePicker.open = false
+  pickerSeq++
+  lyricManager.cancelAll()
+}
+
+/**
+ * 固定用户选择的候选:立即切换展示 + 写缓存(userPinned)。
+ * 失败时提示,不打断面板。
+ */
+export async function chooseCandidate(item: PickerCandidate): Promise<void> {
+  const state = activeState.value
+  if (!state) return
+  candidatePicker.loading = true
+  candidatePicker.error = ''
+  const result = await lyricManager.pinLyrics(trackForState(state), item)
+  candidatePicker.loading = false
+  if (!result) {
+    candidatePicker.error = '该候选获取歌词失败,换一个试试'
+    return
+  }
+  candidatePicker.open = false
+  applyLyricResult(result)
+  lyric.pinned = true
+}
+
+/** 恢复自动匹配:清除固定并按自动路径重取(命中缓存则直接展示) */
+export function unpinCurrent(): void {
+  const state = activeState.value
+  if (!state) return
+  void lyricManager.unpinLyrics(trackForState(state))
+  lyric.pinned = false
+  void fetchLyrics(state)
+}
+
+/** 把 LyricResult 写入展示状态(parse + 翻译映射) */
+function applyLyricResult(result: LyricResult): void {
+  lyric.loading = false
   lyric.source = result.source
+  lyric.notFound = false
+  lyric.lines = []
+  lyric.plain = ''
+  lyric.translationMap = new Map()
   if (result.synced) {
     lyric.lines = parseLrc(result.synced).lines
     if (result.translation) {
