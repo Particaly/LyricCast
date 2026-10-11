@@ -20,6 +20,8 @@ object LanSettings {
     private const val KEY_SEND_ARTWORK = "lan_send_artwork"
     private const val KEY_BLACKLIST = "lan_app_blacklist"
     private const val KEY_WHITELIST = "lan_app_whitelist"
+    /** 诊断日志存储键;设置页保存时直接写入(读写也可走下方 getter/setter) */
+    const val KEY_DIAGNOSTIC_LOG = "lan_diagnostic_log"
 
     const val DEFAULT_PORT = 18765
 
@@ -42,6 +44,18 @@ object LanSettings {
     /** 不发送 LAN 快照的应用包名集合(如视频类 App),空集合表示不过滤。 */
     fun blacklist(context: Context): Set<String> =
         parsePackages(prefs(context).getString(KEY_BLACKLIST, "") ?: "")
+
+    /**
+     * 媒体会话诊断日志开关(任务书阶段 5):开启后每次状态变化打印完整
+     * metadata/extras 键值(仅 logcat,不推送),用于实测各音乐 App 的平台歌曲 ID。
+     * 默认关闭。
+     */
+    fun isDiagnosticLoggingEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_DIAGNOSTIC_LOG, false)
+
+    fun setDiagnosticLoggingEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DIAGNOSTIC_LOG, enabled).apply()
+    }
 
     /** 仅发送白名单内应用的快照;非空时优先于黑名单生效。 */
     fun whitelist(context: Context): Set<String> =

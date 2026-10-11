@@ -173,6 +173,11 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
             lanPushManager?.onMediaInfo(info, controller)
         }
 
+        // 平台歌曲 ID 诊断(默认关闭;仅本地日志,不推送,见 MediaDiagnostics 注释)
+        if (MediaDiagnostics.enabled(applicationContext)) {
+            MediaDiagnostics.logSession(controller)
+        }
+
         // ---- 原有 MQTT 上报逻辑(保持原字段与去重行为,勿改)----
         val playbackState = controller.playbackState
         val metadata = controller.metadata

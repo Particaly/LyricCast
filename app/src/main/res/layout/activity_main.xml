@@ -776,6 +776,15 @@
                     android:textColor="@color/text_secondary"
                     android:textSize="14sp" />
 
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/lan_diagnostic_switch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/lan_diagnostic_switch"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
                 <EditText
                     android:id="@+id/lan_blacklist_edit"
                     android:layout_width="match_parent"

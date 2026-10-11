@@ -343,6 +343,7 @@ class MainActivity : AppCompatActivity() {
         val tokenEdit = findViewById<android.widget.EditText>(R.id.lan_token_edit)
         val regenButton = findViewById<Button>(R.id.lan_regen_token_button)
         val artworkSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_artwork_switch)
+        val diagnosticSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_diagnostic_switch)
         val blacklistEdit = findViewById<android.widget.EditText>(R.id.lan_blacklist_edit)
         val testButton = findViewById<Button>(R.id.lan_test_button)
         val saveButton = findViewById<Button>(R.id.lan_save_button)
@@ -353,6 +354,7 @@ class MainActivity : AppCompatActivity() {
         portEdit.setText(savedPort.toString())
         tokenEdit.setText(LanSettings.token(this))
         artworkSwitch.isChecked = lanPrefs.getBoolean("lan_send_artwork", true)
+        diagnosticSwitch.isChecked = LanSettings.isDiagnosticLoggingEnabled(this)
         blacklistEdit.setText(lanPrefs.getString("lan_app_blacklist", ""))
 
         findViewById<Button>(R.id.lan_scan_button).setOnClickListener {
@@ -397,6 +399,7 @@ class MainActivity : AppCompatActivity() {
         val portEdit = findViewById<android.widget.EditText>(R.id.lan_port_edit)
         val tokenEdit = findViewById<android.widget.EditText>(R.id.lan_token_edit)
         val artworkSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_artwork_switch)
+        val diagnosticSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_diagnostic_switch)
         val blacklistEdit = findViewById<android.widget.EditText>(R.id.lan_blacklist_edit)
 
         val port = portEdit.text.toString().trim().toIntOrNull() ?: LanSettings.DEFAULT_PORT
@@ -406,6 +409,7 @@ class MainActivity : AppCompatActivity() {
             .putInt("lan_port", port)
             .putString("lan_token", tokenEdit.text.toString().trim())
             .putBoolean("lan_send_artwork", artworkSwitch.isChecked)
+            .putBoolean(LanSettings.KEY_DIAGNOSTIC_LOG, diagnosticSwitch.isChecked)
             .putString("lan_app_blacklist", blacklistEdit.text.toString().trim())
             .apply()
 

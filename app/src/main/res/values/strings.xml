@@ -37,6 +37,7 @@
     <string name="lan_token_hint">配对 Token</string>
     <string name="lan_regen_token">重新生成</string>
     <string name="lan_artwork_switch">推送专辑封面</string>
+    <string name="lan_diagnostic_switch">媒体会话诊断日志(仅本地 logcat,排查平台歌曲 ID 用)</string>
     <string name="lan_blacklist_hint">忽略的应用包名,逗号分隔(可选)</string>
     <string name="lan_test_button">测试连接</string>
     <string name="lan_save_button">保存并重连</string>
