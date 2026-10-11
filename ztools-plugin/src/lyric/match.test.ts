@@ -16,11 +16,20 @@ describe('similarity', () => {
   it('is 0 for empty input', () => {
     expect(similarity('', '晴天')).toBe(0)
   })
-  it('is partial for overlap', () => {
-    // '晴天live'(6 字符) vs '晴天'(2):Dice = 2·2/8 = 0.5,超集拿不到满分
+  it('gives 0 when a short title only extends by a version word (handled by version tags)', () => {
+    // v2 语义:版本词(live 等)不再参与裸相似度 —— '晴天live' vs '晴天' 短标题保护直接 0,
+    // 版本失配由 extractVersionTags 的对称惩罚处理(match-cases.test.ts 覆盖)
     const value = similarity('晴天 Live', '晴天')
-    expect(value).toBeGreaterThanOrEqual(0.5)
+    expect(value).toBe(0)
+  })
+
+  it('allows containment for short titles when length ratio is small', () => {
+    // 合法包含:'晴天吖'(3) 包含 '晴天'(2),比例 1.5 → 按包含计算相似度
+    const value = similarity('晴天吖', '晴天')
+    expect(value).toBeGreaterThan(0.4)
     expect(value).toBeLessThan(1)
+    // 比例恰好 2('爱x' vs '爱'):判为悬殊 → 0(1 字标题只允许全等)
+    expect(similarity('爱x', '爱')).toBe(0)
   })
 })
 

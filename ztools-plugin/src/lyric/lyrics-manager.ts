@@ -4,7 +4,7 @@
  */
 import { RequestSupervisor } from './fetcher'
 import { LyricCache, type KVStorage } from './cache'
-import { cleanArtist, cleanTitle } from './clean-title'
+import { cleanArtist, cleanTitleDetailed, parseArtists } from './clean-title'
 import { isUsableSynced, lrcToPlain } from './parse-lrc'
 import type { LyricProvider, LyricQuery, LyricResult } from './types'
 
@@ -106,13 +106,21 @@ export class LyricsManager {
     return result
   }
 
-  /** 组装查询:标题/歌手先清洗,提高命中率 */
+  /**
+   * 组装查询:标题/歌手先清洗提高命中率,同时保留原始值与版本标签:
+   * rawTitle/rawArtist 供 provider 的查询变体回退,versionTags 供打分做对称版本惩罚。
+   */
   private buildQuery(track: TrackForLyrics): LyricQuery {
+    const cleaned = cleanTitleDetailed(track.title, track.artist)
     return {
-      title: cleanTitle(track.title, track.artist),
+      title: cleaned.title,
       artist: cleanArtist(track.artist),
       album: track.album || '',
-      durationMs: track.durationMs || 0
+      durationMs: track.durationMs || 0,
+      rawTitle: track.title,
+      rawArtist: track.artist,
+      allArtists: parseArtists(track.artist),
+      versionTags: [...cleaned.tags]
     }
   }
 }
