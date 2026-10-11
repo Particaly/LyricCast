@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 扫码取景框:白色半透明描边 + 四角圆角,仅作视觉引导,不参与解码裁剪 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <stroke
+        android:width="2dp"
+        android:color="#B3FFFFFF" />
+    <corners android:radius="14dp" />
+</shape>

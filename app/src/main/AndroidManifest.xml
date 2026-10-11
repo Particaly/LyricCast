@@ -5,7 +5,19 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 前台服务 connectedDevice 类型(targetSdk 34 起强制要求类型级权限) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- 常驻通知(Android 13+ 运行时权限,拒绝时服务仍正常运行) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- PLAYING 期间 PARTIAL_WAKE_LOCK + WifiLock(尽力而为,见 protocol.md §9) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- 电池优化白名单引导(仅跳转系统对话框,不静默改设置) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
+    <!-- 扫码配对;camera 特性声明为可选,无摄像头的 TV 设备仍可安装(手动填 Token 兜底) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -28,6 +40,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".QrScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AndroidRelay" />
+
         <service
             android:name=".MediaSessionListenerService"
             android:label="Relay Service"
@@ -37,5 +55,12 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- LAN 推送前台保活:仅本应用启动(exported=false);connectedDevice 类型
+             需要 FOREGROUND_SERVICE_CONNECTED_DEVICE 权限(targetSdk 34) -->
+        <service
+            android:name=".RelayForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

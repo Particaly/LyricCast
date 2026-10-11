@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:full": "node scripts/dev.mjs",
     "build": "vue-tsc && vite build",
+    "build:watch": "vite build --watch",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "qrcode-generator": "^2.0.4",
     "vue": "^3.5.13"
   },
   "devDependencies": {

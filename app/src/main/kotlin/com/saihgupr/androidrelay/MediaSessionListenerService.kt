@@ -40,6 +40,26 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         val componentName = ComponentName(this, MediaSessionListenerService::class.java)
         mediaSessionManager.addOnActiveSessionsChangedListener(this, componentName)
         updateActiveSessions(mediaSessionManager.getActiveSessions(componentName))
+        tryStartForegroundService()
+    }
+
+    /**
+     * 尝试拉起前台保活服务(rebind 常发生在后台,Android 12+ 会抛
+     * ForegroundServiceStartNotAllowedException、Android 14 缺类型权限抛 SecurityException)。
+     * 任何失败都只降级为"仅 Listener 工作",warn 日志,绝不崩溃。
+     */
+    private fun tryStartForegroundService() {
+        if (!LanSettings.isEnabled(this)) return
+        try {
+            // startForegroundService 允许后台拉起,但 Android 12+ 起受 FGS 启动限制,
+            // 失败即降级(onListenerConnected 多数场景发生在前台/解锁后,通常可成功)
+            androidx.core.content.ContextCompat.startForegroundService(
+                this, RelayForegroundService.startIntent(this)
+            )
+            Log.i(TAG, "Foreground service start requested")
+        } catch (e: Exception) {
+            Log.w(TAG, "Foreground service start failed (degrading to listener-only): ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     override fun onActiveSessionsChanged(activeControllers: List<MediaController>?) {

@@ -21,7 +21,14 @@ class MqttRelay(private val context: Context) {
     private var mqttClient: MqttClient? = null
 
     interface MqttStatusListener {
+        /** 连接过程/结果文案(已本地化为中文),UI 可直接展示。 */
         fun onStatusUpdate(message: String, isError: Boolean = false)
+
+        /**
+         * 连接建立(Paho connectComplete 回调,含自动重连)。
+         * UI 判定"测试成功"必须用本回调,不得依赖 onStatusUpdate 的文案子串。
+         */
+        fun onConnected() {}
     }
 
     fun connect(listener: MqttStatusListener? = null) {
@@ -45,30 +52,31 @@ class MqttRelay(private val context: Context) {
                     mqttClient?.setCallback(object : MqttCallbackExtended {
                         override fun connectComplete(reconnect: Boolean, serverURI: String?) {
                             Log.i("AndroidRelay", "Connect successful to $serverURI (reconnect: $reconnect)")
-                            listener?.onStatusUpdate("Connected to $serverURI")
+                            listener?.onConnected()
+                            listener?.onStatusUpdate("已连接到 $serverURI")
                         }
                         override fun connectionLost(cause: Throwable?) {
                             Log.w("AndroidRelay", "Connection lost: ${cause?.message}")
-                            listener?.onStatusUpdate("Connection lost: ${cause?.message}", true)
+                            listener?.onStatusUpdate("连接断开:${cause?.message}", true)
                         }
                         override fun messageArrived(topic: String?, message: MqttMessage?) {}
                         override fun deliveryComplete(token: IMqttDeliveryToken?) {}
                     })
 
                     Log.i("AndroidRelay", "Attempting to connect to $uri...")
-                    listener?.onStatusUpdate("Connecting to $uri...")
+                    listener?.onStatusUpdate("正在连接 $uri …")
                     mqttClient?.connect(options)
                 } catch (e: MqttException) {
                     Log.e("AndroidRelay", "MqttException during connect: ${e.message}", e)
-                    listener?.onStatusUpdate("MQTT Error: ${e.message}", true)
+                    listener?.onStatusUpdate("MQTT 错误:${e.message}", true)
                 } catch (e: Exception) {
                     Log.e("AndroidRelay", "Unexpected error during connect: ${e.message}", e)
-                    listener?.onStatusUpdate("Error: ${e.message}", true)
+                    listener?.onStatusUpdate("错误:${e.message}", true)
                 }
             }.start()
         } catch (e: Exception) {
             Log.e("AndroidRelay", "Error spawning connect thread", e)
-            listener?.onStatusUpdate("Failed to start connection thread", true)
+            listener?.onStatusUpdate("连接线程启动失败", true)
         }
     }
 

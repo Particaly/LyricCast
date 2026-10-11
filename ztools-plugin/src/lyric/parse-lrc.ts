@@ -68,6 +68,49 @@ export function parseLrc(lrc: string): ParsedLyrics {
 }
 
 /**
+ * 判断一段 LRC 是否是"可用的"时间轴歌词。
+ * 网易云等来源对无时间轴的歌也会返回 synced 字段,但内容是纯文本或全零时间戳空壳,
+ * 直接按逐行高亮渲染体验极差;调用方应在展示/缓存前用本函数把关。
+ *
+ * 判定标准:至少 2 行带时间戳、时间戳至少 2 个不同取值、且整体跨度 ≥ 5 秒。
+ * @param lrc LRC 原文
+ */
+export function isUsableSynced(lrc: string): boolean {
+  if (!lrc) return false
+  const { lines } = parseLrc(lrc)
+  if (lines.length < 2) return false
+  const times = new Set(lines.map((line) => line.timeMs))
+  if (times.size < 2) return false
+  const first = lines[0]?.timeMs ?? 0
+  const last = lines[lines.length - 1]?.timeMs ?? 0
+  return last - first >= 5_000
+}
+
+/**
+ * 把 LRC 原文降级为纯文本歌词:剥掉时间戳/增强标签与元数据行,保留演唱文本。
+ * 用于"来源声称 synced 但实际无有效时间轴"时的兜底展示。
+ */
+export function lrcToPlain(lrc: string): string {
+  if (!lrc) return ''
+  const lines: string[] = []
+  for (const rawLine of lrc.split(/\r?\n/)) {
+    // 逐个剥掉行首的 [...] 标签(时间戳与 ar/ti 等元数据);剥完为空说明是纯元数据行
+    const text = rawLine
+      .replace(TIME_TAG, '')
+      .replace(WORD_TAG, '')
+      .replace(/^(\s*\[[^\]]*\])+\s*/, '')
+      .trim()
+    if (text) lines.push(text)
+  }
+  // 相邻去重:同一句被多时间戳标记时只保留一次
+  const result: string[] = []
+  for (const text of lines) {
+    if (result[result.length - 1] !== text) result.push(text)
+  }
+  return result.join('\n')
+}
+
+/**
  * 二分查找"正在唱的一行":最后一个 timeMs <= position 的行;position 早于第一行时返回 -1。
  * @param lines 必须已按 timeMs 升序(parseLrc 保证)
  */

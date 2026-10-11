@@ -1,14 +1,15 @@
 <script setup lang="ts">
 /**
- * 歌词展示:以 rAF 插值位置驱动当前行高亮与平滑滚动(不依赖网络消息到达频率)。
- * - 逐行渲染 + 容器 transform:行数在几百行内,无需虚拟滚动;
- * - 大跨度跳变(seek/切歌)时瞬时定位,常规推进时用 CSS 过渡平滑滚动;
- * - 翻译显示在滚动区下方的固定条(不破坏固定行高的滚动计算);
- * - 纯文本降级、无歌词降级;
- * - 手动偏移:+= 歌词提前,-= 歌词延后,按本曲/此应用记忆。
+ * 首页滚动歌词(网易云「正在播放」页风格):
+ * - 全高视口,当前行居中放大高亮,其余行压暗;rAF 插值位置驱动,不依赖推送频率;
+ * - 翻译内嵌在当前行下方(仅当前行展开)。行高固定,展开槽不改变行盒,
+ *   滚动定位公式 offset = 视口高/2 − 行高/2 − index×行高 无需感知翻译;
+ * - 跨行跳变(seek/切歌)瞬时定位,常规推进平滑滚动;
+ * - 纯文本 / 搜索中 / 无歌词 / 等待播放降级态。
  */
-import { computed, ref, watch } from 'vue'
-import { applyOffset, fontSize, lyric, offsetUi, setFontSize, userOffset } from '../store'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { lyric, userOffset } from '../store'
+import { settings } from '../settings'
 import { findActiveLine } from '../lyric/parse-lrc'
 
 const props = defineProps<{
@@ -16,8 +17,24 @@ const props = defineProps<{
   positionMs: number
 }>()
 
-const LINE_HEIGHT = 40
-const VIEW_HEIGHT = 200
+const fontSize = computed(() => settings.mainFontSize)
+/** 行高随字号派生:给放大后的当前行与翻译槽留足空间 */
+const rowHeight = computed(() => Math.max(48, Math.round(fontSize.value * 2.4)))
+
+const viewport = ref<HTMLElement | null>(null)
+const viewHeight = ref(360)
+let observer: ResizeObserver | null = null
+
+onMounted(() => {
+  if (!viewport.value) return
+  viewHeight.value = viewport.value.clientHeight || 360
+  observer = new ResizeObserver(() => {
+    viewHeight.value = viewport.value?.clientHeight || 360
+  })
+  observer.observe(viewport.value)
+})
+
+onUnmounted(() => observer?.disconnect())
 
 /** 应用偏移后用于查找当前行的位置:offset 正 = 歌词提前 */
 const searchPosition = computed(() =>
@@ -32,200 +49,171 @@ const activeIndex = computed(() => {
 const containerOffset = ref(0)
 const animate = ref(true)
 
-// 索引变化时滚动;跳变 > 3 行视为 seek/切歌,瞬时定位
-watch(activeIndex, (index, previous) => {
-  if (index < 0) {
-    containerOffset.value = 0
-    return
-  }
-  const jump = Math.abs(index - (previous ?? -2))
-  animate.value = jump <= 3
-  containerOffset.value = VIEW_HEIGHT / 2 - LINE_HEIGHT / 2 - index * LINE_HEIGHT
-})
+watch(
+  [activeIndex, rowHeight, viewHeight],
+  ([index, rowH, viewH], previous) => {
+    const previousIndex = previous ? previous[0] : -2
+    animate.value = Math.abs(index - previousIndex) <= 3
+    if (index < 0) {
+      // 还没唱到第一句:让第一行停在视口中部,进场不突兀
+      containerOffset.value = viewH / 2 - rowH / 2
+      return
+    }
+    containerOffset.value = viewH / 2 - rowH / 2 - index * rowH
+  },
+  { immediate: true }
+)
 
 const hasSynced = computed(() => lyric.lines.length > 0)
 
-/** 当前行翻译(固定条展示) */
+/** 当前行翻译(settings.translation 开启且有对应译文) */
 const activeTranslation = computed(() => {
+  if (!settings.translation) return ''
   const index = activeIndex.value
   if (index < 0) return ''
   const line = lyric.lines[index]
   return line ? lyric.translationMap.get(line.timeMs) ?? '' : ''
 })
-
-function formatOffset(ms: number): string {
-  return ms === 0 ? '0' : `${ms > 0 ? '+' : ''}${ms}ms`
-}
-
-function adjustOffset(delta: number) {
-  applyOffset(delta)
-}
-
-function resetOffset() {
-  applyOffset(0)
-}
-
-function setScope(scope: 'track' | 'app') {
-  offsetUi.scope = scope
-}
-
-function decreaseFont() {
-  setFontSize(fontSize.value - 1)
-}
-
-function increaseFont() {
-  setFontSize(fontSize.value + 1)
-}
 </script>
 
 <template>
-  <section class="card">
-    <h2>歌词</h2>
-
-    <!-- 头部:来源 + 偏移控制 + 字号 -->
-    <div class="lyric-header" v-if="hasSynced || lyric.plain">
-      <span class="muted small">来源 {{ lyric.source }}<template v-if="userOffset !== 0"> · 偏移 {{ formatOffset(userOffset) }}</template></span>
-      <div class="controls">
-        <template v-if="hasSynced">
-          <button @click="adjustOffset(-500)" title="歌词延后 500ms">-500</button>
-          <button @click="adjustOffset(-100)" title="歌词延后 100ms">-100</button>
-          <button @click="adjustOffset(100)" title="歌词提前 100ms">+100</button>
-          <button @click="adjustOffset(500)" title="歌词提前 500ms">+500</button>
-          <button v-if="userOffset !== 0" @click="resetOffset">复位</button>
-        </template>
-        <button @click="decreaseFont">A-</button>
-        <button @click="increaseFont">A+</button>
-      </div>
-    </div>
-    <div class="lyric-header" v-if="hasSynced">
-      <span class="muted small">校准记忆:</span>
-      <label class="muted small">
-        <input type="radio" value="track" :checked="offsetUi.scope === 'track'" @change="setScope('track')" /> 本曲
-      </label>
-      <label class="muted small">
-        <input type="radio" value="app" :checked="offsetUi.scope === 'app'" @change="setScope('app')" /> 此应用
-      </label>
-      <span class="muted small">(本曲 {{ formatOffset(offsetUi.trackValue) }} / 此应用 {{ formatOffset(offsetUi.appValue) }})</span>
-    </div>
-
+  <div ref="viewport" class="lyrics">
     <!-- 逐行滚动歌词 -->
     <template v-if="hasSynced">
-      <div class="lyric-view" :style="{ height: VIEW_HEIGHT + 'px' }">
+      <div class="scroll" :class="{ animate }" :style="{ transform: `translateY(${containerOffset}px)` }">
         <div
-          class="lyric-scroll"
-          :class="{ animate }"
-          :style="{ transform: `translateY(${containerOffset}px)` }"
+          v-for="(line, index) in lyric.lines"
+          :key="index"
+          class="row"
+          :class="{ active: index === activeIndex }"
+          :style="{ height: rowHeight + 'px' }"
         >
           <div
-            v-for="(line, index) in lyric.lines"
-            :key="index"
-            class="lyric-line"
-            :class="{ active: index === activeIndex }"
-            :style="{ fontSize: fontSize + 'px', lineHeight: LINE_HEIGHT + 'px' }"
+            class="text"
+            :style="{ fontSize: (index === activeIndex ? fontSize * 1.28 : fontSize) + 'px' }"
           >
             {{ line.text || '♪' }}
           </div>
+          <div class="trans" :class="{ open: index === activeIndex && activeTranslation }">
+            <span v-if="index === activeIndex && activeTranslation">{{ activeTranslation }}</span>
+          </div>
         </div>
-        <!-- 上下渐隐遮罩 -->
-        <div class="fade top"></div>
-        <div class="fade bottom"></div>
-      </div>
-      <div class="translation-bar" :style="{ minHeight: '18px' }">
-        <span v-if="activeTranslation" class="muted">{{ activeTranslation }}</span>
       </div>
     </template>
 
     <!-- 纯文本歌词(无时间轴) -->
     <div class="plain" v-else-if="lyric.plain" :style="{ fontSize: fontSize + 'px' }">{{ lyric.plain }}</div>
 
-    <!-- 状态占位 -->
-    <div class="muted status" v-else-if="lyric.loading">歌词搜索中…</div>
-    <div class="muted status" v-else-if="lyric.notFound">未找到歌词(已缓存结果,次日自动重试)</div>
-    <div class="muted status" v-else>等待播放…</div>
-  </section>
+    <!-- 降级态占位 -->
+    <div class="placeholder" v-else-if="lyric.loading">
+      <span class="pulse">歌词搜索中<i>…</i></span>
+    </div>
+    <div class="placeholder" v-else-if="lyric.notFound">
+      <span class="placeholder-main">未找到歌词</span>
+      <span class="placeholder-sub">已缓存结果,次日自动重试</span>
+    </div>
+    <div class="placeholder" v-else>
+      <span class="placeholder-main">等待播放…</span>
+      <span class="placeholder-sub">手机端播放音乐后,歌词会在这里滚动</span>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.lyric-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.controls {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.controls button {
-  padding: 2px 8px;
-  font-size: 11px;
-}
-
-.lyric-view {
+.lyrics {
   position: relative;
+  flex: 1;
+  min-height: 160px;
   overflow: hidden;
+  /* 上下大范围渐隐:行淡出在进入边缘前就开始,视觉上更接近网易云 */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 72px, #000 calc(100% - 72px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 72px, #000 calc(100% - 72px), transparent 100%);
 }
 
-.lyric-scroll {
+.scroll {
   will-change: transform;
 }
 
-.lyric-scroll.animate {
-  transition: transform 0.3s ease;
+.scroll.animate {
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.lyric-line {
+.row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.text {
+  max-width: 100%;
+  line-height: 1.2;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.38);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-2);
-  transition: color 0.25s;
+  text-align: center;
+  transition: color 0.35s, font-size 0.35s, text-shadow 0.35s;
 }
 
-.lyric-line.active {
-  color: var(--text-1);
-  font-weight: 600;
+.row.active .text {
+  color: #ffffff;
+  font-weight: 700;
+  text-shadow: 0 0 28px rgba(130, 180, 255, 0.38);
 }
 
-.fade {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 36px;
-  pointer-events: none;
-}
-
-.fade.top {
-  top: 0;
-  background: linear-gradient(var(--bg-2), transparent);
-}
-
-.fade.bottom {
-  bottom: 0;
-  background: linear-gradient(transparent, var(--bg-2));
-}
-
-.translation-bar {
-  margin-top: 4px;
+.trans {
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
   font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 18px;
+  color: rgba(255, 255, 255, 0.55);
+  transition: height 0.3s, opacity 0.3s;
+}
+
+.trans.open {
+  height: 18px;
+  opacity: 1;
 }
 
 .plain {
   white-space: pre-wrap;
-  max-height: 240px;
+  height: 100%;
   overflow-y: auto;
-  line-height: 1.6;
+  line-height: 1.7;
+  padding: 4px 6px;
+  box-sizing: border-box;
+  color: rgba(255, 255, 255, 0.78);
 }
 
-.status {
-  padding: 16px 0;
-  text-align: center;
+.placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.placeholder-main {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.placeholder-sub {
+  font-size: 12px;
+}
+
+.pulse i {
+  font-style: normal;
+  animation: blink 1.2s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
 }
 </style>

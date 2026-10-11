@@ -2,30 +2,95 @@ package com.saihgupr.androidrelay
 
 import android.content.ComponentName
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.View
+import android.view.animation.Animation
+import android.view.animation.ScaleAnimation
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 
+/**
+ * 主界面(2026-10 改版):状态优先的单页结构。
+ *
+ * 职责分界:本类只做"配置读写 + 状态展示 + 流程引导",推送与重连在
+ * MediaSessionListenerService/LanPushManager,前台保活在 RelayForegroundService。
+ * 状态来源:LanConnectionState(onResume 注册 / onPause 注销),英雄卡、顶栏胶囊、
+ * LAN 卡标题圆点与"正在推送"卡都由它驱动;通知监听权限引导卡按系统设置条件显示。
+ * 「后台保活」卡(参考 Gotify)提供四项自检与分 ROM 引导,逻辑在 KeepAliveGuide。
+ */
 class MainActivity : AppCompatActivity() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * 扫码配对:QrScanActivity 返回 PC 地址/端口/Token 后,填入 LAN 表单并立即
+     * 保存重启服务(registerForActivityResult 必须在 onCreate 前注册,故为字段)。
+     */
+    private val pairScanLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode != RESULT_OK || data == null) return@registerForActivityResult
+        val host = data.getStringExtra(QrScanActivity.EXTRA_HOST) ?: return@registerForActivityResult
+        val port = data.getIntExtra(QrScanActivity.EXTRA_PORT, LanSettings.DEFAULT_PORT)
+        val token = data.getStringExtra(QrScanActivity.EXTRA_TOKEN) ?: return@registerForActivityResult
+        applyQrPairing(host, port, token)
+    }
+
+    /**
+     * Android 13+ 通知权限:拒绝时前台服务照常运行(仅状态栏不显示),不阻塞配对流程。
+     */
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            Toast.makeText(this, R.string.notify_permission_denied, Toast.LENGTH_LONG).show()
+        }
+    }
 
     // LAN 测试连接的一次性客户端与状态(均在主线程访问)
     private var lanTestClient: LanPushClient? = null
     private var lanTesting = false
     private var lanTestTimeoutPending = false
 
-    // LAN 连接状态监听句柄(onResume 注册 / onPause 注销)
+    // MQTT 测试连接进行中标记(成功后的例行状态播报不再覆盖结果)
+    private var mqttTesting = false
+
+    // LAN 连接状态与曲目摘要的监听句柄(onResume 注册 / onPause 注销)
     private var lanStateListener: ((Boolean, String) -> Unit)? = null
+    private var trackListener: ((LanConnectionState.NowPlaying?) -> Unit)? = null
+
+    // 英雄卡状态点呼吸动画(懒创建,仅已连接时播放)
+    private var heroPulse: Animation? = null
+
+    // 英雄卡描边:bg_card_hero 为运行时改色的专属 drawable(mutate 后不污染共享缓存)
+    private var heroStroke: GradientDrawable? = null
+
+    // 扫码配对成功后需自动展开 LAN 折叠卡,保存展开态引用
+    private lateinit var lanBody: View
+    private lateinit var lanChevron: View
+
+    // 「后台保活」折叠卡的引用与当前 ROM(onCreate 中初始化,onResume 复用)
+    private lateinit var keepAliveBody: View
+    private lateinit var keepAliveChevron: View
+    private lateinit var keepAliveFlavor: RomFlavor
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        heroStroke = findViewById<View>(R.id.hero_card).background.mutate() as GradientDrawable
 
         val permissionButton = findViewById<Button>(R.id.permission_button)
         val mqttBrokerEdit = findViewById<android.widget.EditText>(R.id.mqtt_broker_edit)
@@ -44,16 +109,22 @@ class MainActivity : AppCompatActivity() {
 
         val useAuth = prefs.getBoolean("use_auth", false)
         mqttAuthSwitch.isChecked = useAuth
-        mqttAuthContainer.visibility = if (useAuth) android.view.View.VISIBLE else android.view.View.GONE
+        mqttAuthContainer.visibility = if (useAuth) View.VISIBLE else View.GONE
         mqttUsernameEdit.setText(prefs.getString("username", ""))
         mqttPasswordEdit.setText(prefs.getString("password", ""))
 
         mqttAuthSwitch.setOnCheckedChangeListener { _, isChecked ->
-            mqttAuthContainer.visibility = if (isChecked) android.view.View.VISIBLE else android.view.View.GONE
+            mqttAuthContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
         }
 
         permissionButton.setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+
+        // ADB 授权命令默认收起,点击"无法跳转?用 ADB 授权"展开
+        findViewById<TextView>(R.id.adb_toggle).setOnClickListener {
+            val adb = findViewById<TextView>(R.id.adb_instructions)
+            adb.visibility = if (adb.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
 
         saveButton.setOnClickListener {
@@ -74,71 +145,195 @@ class MainActivity : AppCompatActivity() {
             // Restart service to pick up changes
             val componentName = ComponentName(this, MediaSessionListenerService::class.java)
             android.service.notification.NotificationListenerService.requestRebind(componentName)
-            android.widget.Toast.makeText(this, "Relay Service Re-initialized", android.widget.Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.mqtt_saved_toast, Toast.LENGTH_SHORT).show()
         }
 
-        val testResultText = findViewById<TextView>(R.id.test_result_text)
-        var isTesting = false
-
-        testButton.setOnClickListener {
-            if (isTesting) return@setOnClickListener
-
-            isTesting = true
-            val mqtt = MqttRelay(this)
-            testResultText.text = "Initializing..."
-            testResultText.setTextColor(getColor(R.color.text_secondary))
-
-            mqtt.connect(object : MqttRelay.MqttStatusListener {
-                override fun onStatusUpdate(message: String, isError: Boolean) {
-                    runOnUiThread {
-                        testResultText.text = message
-                        if (isError) {
-                            testResultText.setTextColor(getColor(R.color.status_error))
-                            isTesting = false
-                        } else if (message.contains("Connected")) {
-                            testResultText.setTextColor(getColor(R.color.status_ok))
-                            mqtt.publish(null, "{\"status\": \"test\", \"message\": \"Hello from Relay UI\"}")
-                            isTesting = false
-                        }
-                    }
-                }
-            })
-        }
+        testButton.setOnClickListener { runMqttTest() }
 
         setupLanSection()
+        setupKeepAliveSection()
+        setupCollapsibleSections()
         updateStatus()
+        // 应用启动时若已配对(LAN 开关打开且有地址),尝试拉起前台保活服务
+        maybeStartForegroundService()
     }
 
     override fun onResume() {
         super.onResume()
         updateStatus()
-        // 实时展示 LAN 连接状态(由服务内的 LanPushManager 写入)
-        val listener = { connected: Boolean, text: String ->
-            runOnUiThread {
-                findViewById<TextView>(R.id.lan_status_text).text = text
-                findViewById<TextView>(R.id.lan_status_text).setTextColor(
-                    getColor(if (connected) R.color.status_ok else R.color.text_secondary)
-                )
-            }
+        // 保活自检是实时系统状态(电池/通知),回到前台时重查(含从系统设置页返回的场景)
+        if (::keepAliveFlavor.isInitialized) updateKeepAliveStatus()
+        // 前台保活服务可能因 Android 12+ 后台启动限制(Listener rebind 常在后台)或
+        // ROM 拉起失败而缺席,且该失败完全静默;回到前台是合法启动时机,按存活标记
+        // 幂等补拉一次,避免"有连接、无优先级、无通知"的裸奔态。
+        if (!RelayForegroundService.isRunning) maybeStartForegroundService()
+        // 实时展示 LAN 连接状态与当前曲目(由服务内的 LanPushManager 写入)
+        val stateListener = { connected: Boolean, text: String ->
+            runOnUiThread { applyConnectionState(connected, text) }
         }
-        lanStateListener = listener
-        LanConnectionState.addListener(listener)
+        lanStateListener = stateListener
+        LanConnectionState.addListener(stateListener)
+        val tListener = { track: LanConnectionState.NowPlaying? ->
+            runOnUiThread { applyTrack(track) }
+        }
+        trackListener = tListener
+        LanConnectionState.addTrackListener(tListener)
+        // 先在主线程直接应用当前快照,再交给监听器跟进后续变化
         val (connected, text) = LanConnectionState.snapshot()
-        listener(connected, text)
+        applyConnectionState(connected, text)
+        applyTrack(LanConnectionState.trackSnapshot())
     }
 
     override fun onPause() {
         super.onPause()
         lanStateListener?.let { LanConnectionState.removeListener(it) }
         lanStateListener = null
+        trackListener?.let { LanConnectionState.removeTrackListener(it) }
+        trackListener = null
+        findViewById<View>(R.id.hero_dot).clearAnimation()
+    }
+
+    // ==================== 状态展示 ====================
+
+    /**
+     * 把 LAN 连接状态应用到界面各处:英雄卡(大字状态 + 彩色描边 + 呼吸状态点)、
+     * 顶栏状态胶囊、LAN 折叠卡标题的绿色小圆点、卡内行内状态文本与目标地址行。
+     * 未启用(DISABLED)统一展示为"尚未配对"的引导形态。
+     */
+    private fun applyConnectionState(connected: Boolean, statusText: String) {
+        val status = ConnectionUi.from(connected, statusText)
+        val color = statusColor(status)
+
+        heroStroke?.setStroke(dp(1), color)
+        findViewById<View>(R.id.hero_dot).backgroundTintList = ColorStateList.valueOf(color)
+        findViewById<View>(R.id.status_dot).backgroundTintList = ColorStateList.valueOf(color)
+        val heroDot = findViewById<View>(R.id.hero_dot)
+        heroDot.clearAnimation()
+        if (status == ConnectionUiStatus.CONNECTED) heroDot.startAnimation(pulse())
+
+        findViewById<TextView>(R.id.hero_status_text).text =
+            if (status == ConnectionUiStatus.DISABLED) getString(R.string.status_not_paired) else statusText
+        findViewById<TextView>(R.id.status_capsule_text).text = status.shortLabel
+
+        findViewById<View>(R.id.lan_header_dot).visibility =
+            if (status == ConnectionUiStatus.CONNECTED) View.VISIBLE else View.GONE
+
+        findViewById<TextView>(R.id.lan_status_text).apply {
+            text = statusText
+            setTextColor(getColor(if (connected) R.color.status_ok else R.color.text_secondary))
+        }
+
+        updateHeroTarget()
+    }
+
+    /**
+     * 英雄卡副行:已配置(LAN 开 + 非空地址)时显示"正在同步到 host:port",
+     * 否则显示配对引导文案。保存设置后需手动调用一次刷新。
+     */
+    private fun updateHeroTarget() {
+        val host = LanSettings.host(this)
+        findViewById<TextView>(R.id.hero_target_text).text =
+            if (LanSettings.isEnabled(this) && host.isNotBlank()) {
+                getString(R.string.lan_target_text, host, LanSettings.port(this))
+            } else {
+                getString(R.string.status_not_paired_hint)
+            }
+    }
+
+    /** "正在推送"卡:有选中会话时展示曲目与播放态,无会话回到空态引导文案。 */
+    private fun applyTrack(track: LanConnectionState.NowPlaying?) {
+        val row = findViewById<View>(R.id.now_playing_row)
+        val empty = findViewById<TextView>(R.id.now_playing_empty)
+        if (track == null) {
+            row.visibility = View.GONE
+            empty.visibility = View.VISIBLE
+            return
+        }
+        row.visibility = View.VISIBLE
+        empty.visibility = View.GONE
+        findViewById<TextView>(R.id.now_playing_title).text = track.title
+        findViewById<TextView>(R.id.now_playing_artist).text = track.artist
+        findViewById<TextView>(R.id.now_playing_state).apply {
+            text = getString(if (track.playing) R.string.now_playing_playing else R.string.now_playing_paused)
+            setTextColor(getColor(if (track.playing) R.color.status_ok else R.color.text_hint))
+        }
+    }
+
+    /** 连接状态 → 语义色(绿=已连接,橙=连接/重连中,红=认证失败,灰=未启用)。 */
+    private fun statusColor(status: ConnectionUiStatus): Int = getColor(
+        when (status) {
+            ConnectionUiStatus.CONNECTED -> R.color.status_ok
+            ConnectionUiStatus.CONNECTING, ConnectionUiStatus.RECONNECTING -> R.color.status_warning
+            ConnectionUiStatus.AUTH_FAILED -> R.color.status_error
+            ConnectionUiStatus.DISABLED -> R.color.text_hint
+        }
+    )
+
+    /** 已连接时状态点的呼吸动画(缩放往复);懒创建,可安全重复 start。 */
+    private fun pulse(): Animation {
+        heroPulse?.let { return it }
+        return ScaleAnimation(
+            1f, 1.35f, 1f, 1.35f,
+            Animation.RELATIVE_TO_SELF, 0.5f,
+            Animation.RELATIVE_TO_SELF, 0.5f
+        ).apply {
+            duration = 900
+            repeatMode = Animation.REVERSE
+            repeatCount = Animation.INFINITE
+        }.also { heroPulse = it }
+    }
+
+    /** 通知监听权限引导卡:仅未授权时显示,授权后整卡消失。 */
+    private fun updateStatus() {
+        val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        val isEnabled = enabledListeners?.contains(packageName) == true
+        findViewById<View>(R.id.guide_card).visibility = if (isEnabled) View.GONE else View.VISIBLE
+    }
+
+    // ==================== 折叠卡 ====================
+
+    /**
+     * 组装两张折叠设置卡:点击标题行切换 body 可见性并旋转箭头。
+     * 首次使用(未配置电脑地址)时自动展开 LAN 卡降低上手成本;MQTT 始终默认收起。
+     */
+    private fun setupCollapsibleSections() {
+        lanBody = findViewById(R.id.lan_body)
+        lanChevron = findViewById(R.id.lan_chevron)
+        bindCollapsible(
+            findViewById(R.id.lan_header), lanBody, lanChevron,
+            expanded = LanSettings.host(this).isBlank()
+        )
+        bindCollapsible(
+            findViewById(R.id.mqtt_header),
+            findViewById(R.id.mqtt_body),
+            findViewById(R.id.mqtt_chevron),
+            expanded = false
+        )
+    }
+
+    /** 绑定单个折叠卡:初态 + 点击展开/收起(箭头 0°=收起指向右,90°=展开指向下)。 */
+    private fun bindCollapsible(header: View, body: View, chevron: View, expanded: Boolean) {
+        body.visibility = if (expanded) View.VISIBLE else View.GONE
+        chevron.rotation = if (expanded) 90f else 0f
+        header.setOnClickListener {
+            val expand = body.visibility != View.VISIBLE
+            body.visibility = if (expand) View.VISIBLE else View.GONE
+            chevron.animate().rotation(if (expand) 90f else 0f).setDuration(150).start()
+        }
+    }
+
+    /** 扫码配对落地时自动展开 LAN 卡,让用户看到已填入的配置与连接进度。 */
+    private fun expandLanSection() {
+        lanBody.visibility = View.VISIBLE
+        lanChevron.animate().rotation(90f).setDuration(150).start()
     }
 
     // ==================== LAN Push 设置区 ====================
 
     /**
-     * 组装 LAN 推送卡片:读取配置、重新生成 Token、保存重连、一次性连接测试。
+     * 组装 LAN 推送卡:读取配置、重新生成 Token、保存重连、一次性连接测试。
      * LAN 设置独立存放("lan_config"),保存后通过 requestRebind 重启服务生效,
-     * 与 MQTT 的"Save and Restart Service"互不干扰。
+     * 与 MQTT 的"保存并重启服务"互不干扰。
      */
     private fun setupLanSection() {
         val lanPrefs = LanSettings.prefs(this)
@@ -160,28 +355,74 @@ class MainActivity : AppCompatActivity() {
         artworkSwitch.isChecked = lanPrefs.getBoolean("lan_send_artwork", true)
         blacklistEdit.setText(lanPrefs.getString("lan_app_blacklist", ""))
 
+        findViewById<Button>(R.id.lan_scan_button).setOnClickListener {
+            pairScanLauncher.launch(QrScanActivity.intent(this))
+        }
+
         regenButton.setOnClickListener {
             tokenEdit.setText(LanSettings.generateToken())
         }
 
-        saveButton.setOnClickListener {
-            val port = portEdit.text.toString().trim().toIntOrNull() ?: LanSettings.DEFAULT_PORT
-            lanPrefs.edit()
-                .putBoolean("lan_enabled", enabledSwitch.isChecked)
-                .putString("lan_host", hostEdit.text.toString().trim())
-                .putInt("lan_port", port)
-                .putString("lan_token", tokenEdit.text.toString().trim())
-                .putBoolean("lan_send_artwork", artworkSwitch.isChecked)
-                .putString("lan_app_blacklist", blacklistEdit.text.toString().trim())
-                .apply()
-
-            // 重启监听服务,使新配置立即生效(服务 onCreate 会按开关建立/不建立连接)
-            val componentName = ComponentName(this, MediaSessionListenerService::class.java)
-            android.service.notification.NotificationListenerService.requestRebind(componentName)
-            android.widget.Toast.makeText(this, "LAN settings saved, service restarted", android.widget.Toast.LENGTH_SHORT).show()
-        }
+        saveButton.setOnClickListener { saveLanSettings() }
 
         testButton.setOnClickListener { runLanConnectionTest() }
+    }
+
+    /**
+     * 扫码成功的落地动作:填入 PC 地址/端口/Token、打开 LAN 开关并保存重启服务,
+     * 与手动"保存并重连"完全同一条路径;手动微调仍走表单 + 保存按钮。
+     * 配对成功后顺势完成:展开 LAN 卡 → 前台服务启动 → 通知权限 → 保活引导。
+     */
+    private fun applyQrPairing(host: String, port: Int, token: String) {
+        findViewById<android.widget.EditText>(R.id.lan_host_edit).setText(host)
+        findViewById<android.widget.EditText>(R.id.lan_port_edit).setText(port.toString())
+        findViewById<android.widget.EditText>(R.id.lan_token_edit).setText(token)
+        findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_enabled_switch).isChecked = true
+        saveLanSettings()
+        expandLanSection()
+        findViewById<TextView>(R.id.lan_test_result_text).text =
+            getString(R.string.lan_pair_success, "$host:$port")
+        maybeRequestNotificationPermission()
+        maybeRunKeepAliveOnboarding()
+    }
+
+    /**
+     * 读取 LAN 表单并持久化,随后 requestRebind 重启监听服务使配置立即生效
+     * (保存按钮与扫码导入共用;服务 onCreate 会按开关建立/不建立连接)。
+     */
+    private fun saveLanSettings() {
+        val lanPrefs = LanSettings.prefs(this)
+        val enabledSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_enabled_switch)
+        val hostEdit = findViewById<android.widget.EditText>(R.id.lan_host_edit)
+        val portEdit = findViewById<android.widget.EditText>(R.id.lan_port_edit)
+        val tokenEdit = findViewById<android.widget.EditText>(R.id.lan_token_edit)
+        val artworkSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_artwork_switch)
+        val blacklistEdit = findViewById<android.widget.EditText>(R.id.lan_blacklist_edit)
+
+        val port = portEdit.text.toString().trim().toIntOrNull() ?: LanSettings.DEFAULT_PORT
+        lanPrefs.edit()
+            .putBoolean("lan_enabled", enabledSwitch.isChecked)
+            .putString("lan_host", hostEdit.text.toString().trim())
+            .putInt("lan_port", port)
+            .putString("lan_token", tokenEdit.text.toString().trim())
+            .putBoolean("lan_send_artwork", artworkSwitch.isChecked)
+            .putString("lan_app_blacklist", blacklistEdit.text.toString().trim())
+            .apply()
+
+        // 重启监听服务,使新配置立即生效
+        val componentName = ComponentName(this, MediaSessionListenerService::class.java)
+        android.service.notification.NotificationListenerService.requestRebind(componentName)
+        Toast.makeText(this, R.string.lan_saved_toast, Toast.LENGTH_SHORT).show()
+
+        // 英雄卡目标地址行跟随新配置;连接状态等服务的重启事件回报后自然刷新
+        updateHeroTarget()
+
+        // 关闭 LAN 开关时同步停掉前台保活,避免通知栏残留"未配对"状态
+        if (!enabledSwitch.isChecked) {
+            stopService(Intent(this, RelayForegroundService::class.java))
+        } else {
+            maybeStartForegroundService()
+        }
     }
 
     /**
@@ -199,20 +440,20 @@ class MainActivity : AppCompatActivity() {
         val port = portEdit.text.toString().trim().toIntOrNull() ?: LanSettings.DEFAULT_PORT
         val token = tokenEdit.text.toString().trim().ifBlank { LanSettings.token(this) }
         if (host.isBlank()) {
-            resultText.text = "Please enter the PC address first."
+            resultText.text = getString(R.string.lan_test_need_host)
             resultText.setTextColor(getColor(R.color.status_error))
             return
         }
 
         lanTesting = true
         lanTestTimeoutPending = true
-        resultText.text = "Connecting to $host:$port ..."
+        resultText.text = getString(R.string.lan_test_connecting, host, port)
         resultText.setTextColor(getColor(R.color.text_secondary))
 
         mainHandler.postDelayed({
             lanTestTimeoutPending = false
             if (lanTesting) {
-                finishLanTest("Timeout: no response from $host:$port (check IP/port and PC firewall)", true)
+                finishLanTest(getString(R.string.lan_test_timeout, "$host:$port"), true)
             }
         }, 6000)
 
@@ -235,7 +476,7 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onDisconnected(reason: String) {
                     if (lanTestTimeoutPending) return // 让超时分支给出更友好的提示
-                    finishLanTest("Cannot connect: $reason", true)
+                    finishLanTest(getString(R.string.lan_test_failed, reason), true)
                 }
 
                 override fun onMessage(message: JSONObject) {
@@ -244,9 +485,9 @@ class MainActivity : AppCompatActivity() {
                         mainHandler.removeCallbacksAndMessages(null)
                     }
                     when (message.optString("type")) {
-                        "hello_ack" -> finishLanTest("Connected! Server acknowledged the token.", false)
+                        "hello_ack" -> finishLanTest(getString(R.string.lan_test_ok), false)
                         "error" -> finishLanTest(
-                            "Rejected by server (${message.optString("code")}) — check the token.",
+                            getString(R.string.lan_test_rejected, message.optString("code")),
                             true
                         )
                     }
@@ -266,24 +507,258 @@ class MainActivity : AppCompatActivity() {
         resultText.setTextColor(getColor(if (isError) R.color.status_error else R.color.status_ok))
     }
 
-    private fun updateStatus() {
-        val statusText = findViewById<TextView>(R.id.status_text)
-        val permissionButton = findViewById<Button>(R.id.permission_button)
-        val adbInstructions = findViewById<TextView>(R.id.adb_instructions)
+    // ==================== MQTT 测试 ====================
 
-        val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        val isEnabled = enabledListeners?.contains(packageName) == true
+    /**
+     * 一次性 MQTT 测试:按当前保存的配置连接 Broker;成功判定走 [MqttRelay.MqttStatusListener
+     * onConnected] 回调(Paho connectComplete),成功后发一条测试消息并停止接收后续播报。
+     */
+    private fun runMqttTest() {
+        if (mqttTesting) return
+        val testResultText = findViewById<TextView>(R.id.test_result_text)
 
-        if (isEnabled) {
-            statusText.text = "Connected and Authorized"
-            statusText.setTextColor(getColor(R.color.status_ok))
-            permissionButton.visibility = android.view.View.GONE
-            adbInstructions.visibility = android.view.View.GONE
-        } else {
-            statusText.text = "Permission Required"
-            statusText.setTextColor(getColor(R.color.status_error))
-            permissionButton.visibility = android.view.View.VISIBLE
-            adbInstructions.visibility = android.view.View.VISIBLE
+        mqttTesting = true
+        val mqtt = MqttRelay(this)
+        testResultText.text = getString(R.string.mqtt_test_init)
+        testResultText.setTextColor(getColor(R.color.text_secondary))
+
+        mqtt.connect(object : MqttRelay.MqttStatusListener {
+            override fun onStatusUpdate(message: String, isError: Boolean) {
+                runOnUiThread {
+                    if (!mqttTesting) return@runOnUiThread // 成功后的例行播报不覆盖绿色结果
+                    testResultText.text = message
+                    if (isError) {
+                        testResultText.setTextColor(getColor(R.color.status_error))
+                        mqttTesting = false
+                    }
+                }
+            }
+
+            override fun onConnected() {
+                runOnUiThread {
+                    testResultText.setTextColor(getColor(R.color.status_ok))
+                    mqtt.publish(null, "{\"status\": \"test\", \"message\": \"Hello from Relay UI\"}")
+                    mqttTesting = false
+                }
+            }
+        })
+    }
+
+    // ==================== 前台服务与权限引导 ====================
+
+    /** LAN 已启用且配置了地址时,前台启动保活服务;失败仅提示,不阻塞设置流程。 */
+    private fun maybeStartForegroundService() {
+        if (!LanSettings.isEnabled(this) || LanSettings.host(this).isBlank()) return
+        try {
+            androidx.core.content.ContextCompat.startForegroundService(
+                this, RelayForegroundService.startIntent(this)
+            )
+        } catch (e: Exception) {
+            Toast.makeText(this, getString(R.string.fg_start_failed, e.javaClass.simpleName), Toast.LENGTH_SHORT)
+                .show()
         }
+    }
+
+    /** Android 13+ 申请 POST_NOTIFICATIONS;其他版本无操作。 */
+    private fun maybeRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    // ==================== 后台保活 ====================
+
+    /**
+     * 组装「后台保活」折叠卡(参考 Gotify 的保活引导):按当前 ROM 填入指引文案、
+     * 绑定三项跳转(电池优化弹窗 / ROM 自启动页 / 本应用通知设置)与两个用户确认开关
+     * (自启动、多任务加锁没有系统 API 可查,只能由用户勾选)。
+     * 原生 ROM 下自启动项退化为"无需设置"、加锁整行隐藏,避免展示做不到的步骤。
+     */
+    private fun setupKeepAliveSection() {
+        val flavor = RomFlavor.detect(Build.MANUFACTURER, Build.BRAND)
+        keepAliveFlavor = flavor
+        keepAliveBody = findViewById(R.id.ka_body)
+        keepAliveChevron = findViewById(R.id.ka_chevron)
+        bindCollapsible(
+            findViewById(R.id.ka_header), keepAliveBody, keepAliveChevron,
+            expanded = false
+        )
+
+        findViewById<TextView>(R.id.ka_rom_label).text =
+            getString(R.string.ka_rom_label, flavor.label)
+        findViewById<TextView>(R.id.ka_desc_autostart).setText(flavor.autostartStepsRes)
+        findViewById<TextView>(R.id.ka_desc_recents).setText(flavor.lockStepsRes)
+
+        findViewById<Button>(R.id.ka_btn_battery).setOnClickListener {
+            if (!KeepAliveIntents.requestIgnoreBatteryOptimizations(this)) {
+                Toast.makeText(this, R.string.battery_dialog_manual_fallback, Toast.LENGTH_LONG).show()
+            }
+        }
+        findViewById<Button>(R.id.ka_btn_autostart).setOnClickListener {
+            if (!KeepAliveIntents.openAutostart(this, flavor)) {
+                Toast.makeText(this, R.string.ka_autostart_no_entry, Toast.LENGTH_LONG).show()
+            }
+        }
+        findViewById<Button>(R.id.ka_btn_notification).setOnClickListener {
+            KeepAliveIntents.openAppNotificationSettings(this)
+        }
+
+        bindConfirmSwitch(
+            R.id.ka_switch_autostart, KeepAliveChecks.autostartConfirmed(this)
+        ) { KeepAliveChecks.setAutostartConfirmed(this, it) }
+        bindConfirmSwitch(
+            R.id.ka_switch_recents, KeepAliveChecks.recentsConfirmed(this)
+        ) { KeepAliveChecks.setRecentsConfirmed(this, it) }
+
+        if (!flavor.needsAutostart) {
+            findViewById<View>(R.id.ka_btn_autostart).visibility = View.GONE
+            findViewById<View>(R.id.ka_switch_autostart).visibility = View.GONE
+        }
+        if (!flavor.needsLockHint) {
+            findViewById<View>(R.id.ka_item_recents).visibility = View.GONE
+        }
+        updateKeepAliveStatus()
+    }
+
+    /** 用户确认开关的统一绑定:写入持久化后立即刷新自检,不依赖 onResume 才变色。 */
+    private fun bindConfirmSwitch(id: Int, initial: Boolean, setter: (Boolean) -> Unit) {
+        val switch = findViewById<androidx.appcompat.widget.SwitchCompat>(id)
+        switch.isChecked = initial
+        switch.setOnCheckedChangeListener { _, checked ->
+            setter(checked)
+            updateKeepAliveStatus()
+        }
+    }
+
+    /** 当前四项保活自检的快照(卡片展示与配对后的引导弹窗共用同一判定)。 */
+    private fun currentKeepAliveCheck(): KeepAliveCheck = KeepAliveCheck.evaluate(
+        batteryOk = KeepAliveChecks.batteryOk(this),
+        notificationOk = KeepAliveChecks.notificationOk(this),
+        autostartConfirmed = KeepAliveChecks.autostartConfirmed(this),
+        recentsConfirmed = KeepAliveChecks.recentsConfirmed(this),
+        flavor = keepAliveFlavor,
+    )
+
+    /**
+     * 自检刷新:状态点(绿=已完成/橙=待完成/灰=无需设置)、单项状态文案、
+     * 页头汇总("x/4 项待完成")与总结行。onResume、开关勾选、跳转设置返回后都会重跑。
+     */
+    private fun updateKeepAliveStatus() {
+        val check = currentKeepAliveCheck()
+        applyKeepAliveItem(R.id.ka_dot_battery, R.id.ka_state_battery, check.batteryOk, needed = true)
+        applyKeepAliveItem(
+            R.id.ka_dot_autostart, R.id.ka_state_autostart,
+            check.autostartOk, keepAliveFlavor.needsAutostart
+        )
+        applyKeepAliveItem(
+            R.id.ka_dot_recents, R.id.ka_state_recents,
+            check.recentsOk, keepAliveFlavor.needsLockHint
+        )
+        applyKeepAliveItem(
+            R.id.ka_dot_notification, R.id.ka_state_notification,
+            check.notificationOk, needed = true
+        )
+
+        val pending = check.pending()
+        findViewById<View>(R.id.ka_header_dot).backgroundTintList =
+            ColorStateList.valueOf(
+                getColor(if (check.allDone) R.color.status_ok else R.color.status_warning)
+            )
+        findViewById<TextView>(R.id.ka_header_subtitle).text =
+            if (check.allDone) getString(R.string.ka_header_all_done)
+            else getString(R.string.ka_header_pending, pending.size, TOTAL_KEEPALIVE_ITEMS)
+        findViewById<TextView>(R.id.ka_summary).text =
+            if (check.allDone) getString(R.string.ka_summary_all_done)
+            else getString(R.string.ka_summary_pending, pending.size)
+    }
+
+    /**
+     * 单项自检展示:needed=false(原生 ROM 无此项)显示灰点+"无需设置";
+     * 否则绿="已完成"、橙="待完成",状态文字用对应颜色强调。
+     */
+    private fun applyKeepAliveItem(dotId: Int, stateId: Int, ok: Boolean, needed: Boolean) {
+        val (colorRes, textRes) = when {
+            !needed -> R.color.text_hint to R.string.ka_state_not_needed
+            ok -> R.color.status_ok to R.string.ka_state_done
+            else -> R.color.status_warning to R.string.ka_state_pending
+        }
+        findViewById<View>(dotId).backgroundTintList = ColorStateList.valueOf(getColor(colorRes))
+        findViewById<TextView>(stateId).apply {
+            text = getString(textRes)
+            setTextColor(getColor(colorRes))
+        }
+    }
+
+    /**
+     * 配对成功后的保活引导(替代 0.3.0 的一次性电池弹窗 + 泛化 ROM 提示):
+     * 按 电池优化 → 自启动/后台活动 → 多任务加锁 → 常驻通知 的顺序,
+     * 逐个弹出当前未完成项的说明与跳转;每个弹窗都可"稍后再说"跳过,
+     * 或"不再提示"永久关闭(「后台保活」卡内随时可继续完成)。
+     */
+    private fun maybeRunKeepAliveOnboarding() {
+        if (KeepAliveChecks.onboardingDismissed(this)) return
+        val steps = currentKeepAliveCheck().pending()
+        if (steps.isNotEmpty()) showKeepAliveStep(steps, 0)
+    }
+
+    /** 递归展示引导步骤:正向动作后进入下一步;跳过/不再提示同样推进或终止整个链条。 */
+    private fun showKeepAliveStep(steps: List<KeepAliveStep>, index: Int) {
+        val step = steps.getOrNull(index)
+        if (step == null) {
+            updateKeepAliveStatus()
+            return
+        }
+        val builder = AlertDialog.Builder(this)
+        when (step) {
+            KeepAliveStep.BATTERY -> builder
+                .setTitle(R.string.battery_dialog_title)
+                .setMessage(R.string.battery_dialog_message)
+                .setPositiveButton(R.string.battery_dialog_go) { _, _ ->
+                    if (!KeepAliveIntents.requestIgnoreBatteryOptimizations(this)) {
+                        Toast.makeText(this, R.string.battery_dialog_manual_fallback, Toast.LENGTH_LONG).show()
+                    }
+                    showKeepAliveStep(steps, index + 1)
+                }
+            KeepAliveStep.AUTOSTART -> builder
+                .setTitle(R.string.ka_step_autostart_title)
+                .setMessage(keepAliveFlavor.autostartStepsRes)
+                .setPositiveButton(R.string.ka_action_go) { _, _ ->
+                    if (!KeepAliveIntents.openAutostart(this, keepAliveFlavor)) {
+                        Toast.makeText(this, R.string.ka_autostart_no_entry, Toast.LENGTH_LONG).show()
+                    }
+                    showKeepAliveStep(steps, index + 1)
+                }
+            KeepAliveStep.LOCK_RECENTS -> builder
+                .setTitle(R.string.ka_step_lock_title)
+                .setMessage(keepAliveFlavor.lockStepsRes)
+                .setPositiveButton(R.string.ka_action_locked) { _, _ ->
+                    // 加锁无法程序验证,以用户点"已加锁"作为确认
+                    KeepAliveChecks.setRecentsConfirmed(this, true)
+                    showKeepAliveStep(steps, index + 1)
+                }
+            KeepAliveStep.NOTIFICATION -> builder
+                .setTitle(R.string.ka_step_notification_title)
+                .setMessage(R.string.ka_notification_desc)
+                .setPositiveButton(R.string.ka_action_notification) { _, _ ->
+                    KeepAliveIntents.openAppNotificationSettings(this)
+                    showKeepAliveStep(steps, index + 1)
+                }
+        }
+        builder
+            .setNeutralButton(R.string.ka_action_never) { _, _ ->
+                KeepAliveChecks.setOnboardingDismissed(this)
+                Toast.makeText(this, R.string.ka_onboarding_dismissed_toast, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.battery_dialog_later) { _, _ ->
+                showKeepAliveStep(steps, index + 1)
+            }
+            .show()
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        /** 自检总项数,仅用于页头"x/4 项待完成"的展示。 */
+        const val TOTAL_KEEPALIVE_ITEMS = 4
     }
 }

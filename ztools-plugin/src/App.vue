@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { activeArtwork, activeState, initStore, ui } from './store'
+/**
+ * LAN 歌词主界面:
+ * - 「歌词」首页 = 网易云「正在播放」页:封面氛围背景 + 正在播放条 + 全高滚动歌词;
+ * - 「设置」页 = 桌面歌词 / 歌词显示 / 校准 / 连接(端口、Token、配对二维码)/ 关于;
+ * - 桌面歌词:独立置顶透明窗口(desktop-bridge),主界面 rAF tick 顺带驱动其状态推送。
+ */
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { activeArtwork, displayAnchor, initStore, ui } from './store'
+import { renderProgress, type LinkStatus } from './progress'
+import { settings } from './settings'
+import { disableDesktopLyrics, enableDesktopLyrics, notifyStyleChanged } from './desktop-bridge'
 import Lyrics from './components/Lyrics.vue'
+import SettingsView from './components/SettingsView.vue'
 
 /** 协议状态 → 中文展示 */
 const STATE_TEXT: Record<string, string> = {
@@ -12,25 +22,36 @@ const STATE_TEXT: Record<string, string> = {
   none: '无播放'
 }
 
+/** 降级状态 → 徽标附加文案(协议 §6.3) */
+const LINK_TEXT: Record<LinkStatus, string> = {
+  connected: '',
+  stale: '数据延迟',
+  grace: '已断开 · 重连中',
+  disconnected: '已断开'
+}
+
+type Tab = 'lyrics' | 'settings'
+const tab = ref<Tab>('lyrics')
+
 const cleanupRef = ref<(() => void) | null>(null)
-const position = ref<{ positionMs: number; known: boolean; state: string } | null>(null)
+interface PositionView {
+  positionMs: number
+  known: boolean
+  state: string
+  status: LinkStatus
+}
+const position = ref<PositionView | null>(null)
 let rafId = 0
 let lastUiUpdate = 0
 
-const snapshot = computed(() => ui.snapshot)
+const displayState = computed(() => displayAnchor.value?.state ?? null)
+
 const hasDevices = computed(() => (ui.snapshot?.devices.length ?? 0) > 0)
 
-const primaryAddress = computed(() => {
-  const addresses = ui.snapshot?.addresses ?? []
-  // 优先 192.168.*(家庭局域网最常见),否则取第一个
-  const preferred = addresses.find((a) => a.startsWith('192.168.'))
-  return preferred ?? addresses[0] ?? '未获取到局域网 IP'
-})
-
 const statusText = computed(() => {
-  if (ui.serverError) return `服务错误:${ui.serverError}`
+  if (ui.serverError) return '服务错误'
   if (!ui.snapshot?.listening) return '服务未启动'
-  if (!hasDevices.value) return '等待手机连接…'
+  if (!hasDevices.value) return '等待手机连接'
   return `已连接 ${ui.snapshot.devices.length} 台设备`
 })
 
@@ -39,17 +60,18 @@ const statusDot = computed(() => {
   return hasDevices.value ? 'ok' : 'warn'
 })
 
-const rttText = computed(() => {
-  const device = ui.snapshot?.devices.find((d) => d.deviceId === ui.snapshot?.activeDeviceId)
-  return device && device.rttMs >= 0 ? `延迟 ${device.rttMs}ms` : '测量延迟中…'
-})
-
 const stateBadge = computed(() => {
-  const state = activeState.value?.playback.state ?? 'none'
-  return `${STATE_TEXT[state] ?? state}`
+  if (!displayState.value) return ''
+  const base = STATE_TEXT[displayState.value.playback.state ?? 'none'] ?? '无播放'
+  const link = position.value?.status ?? 'connected'
+  const suffix = LINK_TEXT[link]
+  return suffix ? `${base} · ${suffix}` : base
 })
 
-const durationMs = computed(() => activeState.value?.track.durationMs ?? 0)
+/** 断线且超过宽限期:整卡灰化,保留最后一首歌的信息 */
+const offline = computed(() => position.value?.status === 'disconnected')
+
+const durationMs = computed(() => displayAnchor.value?.state.track.durationMs ?? 0)
 const positionMs = computed(() => position.value?.positionMs ?? 0)
 const progressPct = computed(() =>
   durationMs.value > 0 ? Math.min(100, (positionMs.value / durationMs.value) * 100) : 0
@@ -70,72 +92,66 @@ function formatTime(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-/** rAF 驱动进度显示;~20fps 足够,降低无谓重绘 */
+/**
+ * rAF 驱动进度显示;~20fps 足够,降低无谓重绘。
+ * 页面不可见时 rAF 自动暂停(Electron 行为),恢复后由纯函数按墙钟一次性算对。
+ * 桌面歌词的推送不在这里驱动 —— bridge 自持定时器,主窗口隐藏时依然换行。
+ */
 function tick(now: number) {
   rafId = requestAnimationFrame(tick)
   if (now - lastUiUpdate < 50) return
   lastUiUpdate = now
-  const next = window.services.lanLyrics.getPosition()
-  if (next) position.value = { positionMs: next.positionMs, known: next.known, state: next.state }
-}
-
-function setActiveDevice(event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  window.services.lanLyrics.setActiveDevice(value)
-}
-
-function copyConfig() {
-  const snapshotValue = ui.snapshot
-  if (!snapshotValue) return
-  const text = `PC 地址:${primaryAddress.value}\n端口:${snapshotValue.port}\nToken:${snapshotValue.token}`
-  if (window.ztools?.copyText) {
-    window.ztools.copyText(text)
-  } else {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    document.body.appendChild(textarea)
-    textarea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textarea)
-  }
-}
-
-// ===== 设置区(端口 / Token)=====
-const editingPort = ref('')
-const editingToken = ref('')
-const showSettings = ref(false)
-const settingsSavedTip = ref('')
-
-function toggleSettings() {
-  showSettings.value = !showSettings.value
-  if (showSettings.value && snapshot.value) {
-    editingPort.value = String(snapshot.value.port)
-    editingToken.value = snapshot.value.token
-    settingsSavedTip.value = ''
-  }
-}
-
-function regenerateToken() {
-  editingToken.value = window.services.lanLyrics.generateToken()
-}
-
-async function saveSettings() {
-  const port = parseInt(editingPort.value, 10) || 18765
-  const token = editingToken.value.trim()
-  if (token.length < 16) {
-    settingsSavedTip.value = 'Token 至少 16 位'
+  const anchor = displayAnchor.value
+  if (!anchor) {
+    position.value = null
     return
   }
-  const result = await window.services.lanLyrics.start({ port, token })
-  settingsSavedTip.value = result.ok ? '已保存并重启服务' : `重启失败:${result.error}`
-  if (result.ok) ui.snapshot = window.services.lanLyrics.getSnapshot()
+  const rendered = renderProgress(anchor, Date.now())
+  position.value = {
+    positionMs: rendered.positionMs,
+    known: rendered.known,
+    state: anchor.state.playback.state,
+    status: rendered.status
+  }
 }
+
+// ===== 桌面歌词生命周期:开关 → 创建/销毁悬浮窗;样式设置变化 → 立即重推 =====
+watch(
+  () => settings.desktopEnabled,
+  (enabled) => {
+    if (enabled) {
+      const result = enableDesktopLyrics()
+      ui.desktopError = result.ok ? '' : result.error || '创建悬浮窗失败'
+    } else {
+      ui.desktopError = ''
+      disableDesktopLyrics()
+    }
+  }
+)
+
+watch(
+  () => [
+    settings.desktopFontSize,
+    settings.desktopTheme,
+    settings.desktopTranslation,
+    settings.desktopLocked,
+    settings.desktopOpacity,
+    settings.desktopWidth,
+    settings.desktopHeight
+  ],
+  () => notifyStyleChanged()
+)
 
 function requestArtwork() {
   window.services.lanLyrics.requestArtwork()
 }
 
 onMounted(async () => {
+  // 后台运行场景:插件视图被隐藏时 Vue 不一定 unmount,悬浮窗交给 onPluginOut 统一清理,
+  // 保证「跟随主程序运行」时桌面歌词常驻
+  try {
+    window.ztools?.onPluginOut?.(() => disableDesktopLyrics())
+  } catch (_) { /* 非 ZTools 环境 */ }
   cleanupRef.value = await initStore()
   rafId = requestAnimationFrame(tick)
 })
@@ -147,214 +163,447 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app">
-    <header class="header">
-      <h1>LAN 歌词</h1>
-      <span class="status">
+  <div class="app" :class="{ 'on-stage': tab === 'lyrics' }">
+    <!-- 封面模糊氛围背景:铺在整页(顶栏 + 内容区共用同一张连续背景),仅歌词页显示 -->
+    <div
+      v-show="tab === 'lyrics'"
+      class="ambience"
+      :class="{ on: !!artworkUrl && displayState }"
+      :style="artworkUrl ? { backgroundImage: `url(${artworkUrl})` } : {}"
+    ></div>
+    <div v-show="tab === 'lyrics'" class="scrim"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">♪</span>
+        <span class="brand-name">LAN 歌词</span>
+      </div>
+      <nav class="tabs">
+        <button :class="{ on: tab === 'lyrics' }" @click="tab = 'lyrics'">歌词</button>
+        <button :class="{ on: tab === 'settings' }" @click="tab = 'settings'">设置</button>
+      </nav>
+      <span class="status" :title="ui.serverError || statusText">
         <span class="dot" :class="statusDot"></span>{{ statusText }}
       </span>
     </header>
 
-    <!-- 连接信息 -->
-    <section class="card">
-      <h2>手机接入</h2>
-      <div class="row">
-        <span class="mono">{{ primaryAddress }}:{{ snapshot?.port ?? 18765 }}</span>
-        <button @click="copyConfig">复制配置</button>
-        <button @click="toggleSettings">{{ showSettings ? '收起设置' : '端口 / Token' }}</button>
-      </div>
-      <div v-if="showSettings" class="settings">
-        <label>端口 <input v-model="editingPort" class="mono" style="width: 80px" /></label>
-        <label>Token <input v-model="editingToken" class="mono" style="width: 210px" /></label>
-        <button @click="regenerateToken">重新生成</button>
-        <button class="primary" @click="saveSettings">保存并重启服务</button>
-        <span v-if="settingsSavedTip" class="muted">{{ settingsSavedTip }}</span>
-      </div>
-      <div class="row muted hint">
-        在手机 App「Android Relay → LAN Push」中填入以上地址与 Token
-      </div>
-    </section>
+    <main class="view">
+      <!-- ===== 首页:氛围舞台 + 正在播放 + 滚动歌词 ===== -->
+      <section v-show="tab === 'lyrics'" class="stage">
+        <template v-if="displayState">
+          <!-- 正在播放条(断线超宽限期整卡灰化,信息保留) -->
+          <section class="np" :class="{ offline }">
+            <img v-if="artworkUrl" class="artwork" :src="artworkUrl" alt="封面" />
+            <div
+              v-else
+              class="artwork placeholder"
+              @click="requestArtwork"
+              title="点击重试获取封面"
+            >
+              ♪
+            </div>
+            <div class="np-meta">
+              <div class="np-title">{{ displayState.track.title || '(未知标题)' }}</div>
+              <div class="np-sub">
+                {{ displayState.track.artist || '(未知歌手)'
+                }}<template v-if="displayState.track.album"> · {{ displayState.track.album }}</template>
+              </div>
+              <div class="np-tags">
+                <span class="badge">{{ displayState.app.name || displayState.app.package }}</span>
+                <span class="badge" :class="{ warn: offline }">{{ stateBadge }}</span>
+              </div>
+            </div>
+            <div class="np-progress">
+              <span class="mono time">{{ positionKnown ? formatTime(positionMs) : '--:--' }}</span>
+              <div class="progress">
+                <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
+              </div>
+              <span class="mono time">{{ formatTime(durationMs) }}</span>
+            </div>
+          </section>
 
-    <!-- 设备 -->
-    <section class="card" v-if="snapshot && snapshot.devices.length > 0">
-      <h2>设备</h2>
-      <div v-if="snapshot.devices.length > 1" class="row">
-        <select :value="snapshot.activeDeviceId ?? ''" @change="setActiveDevice">
-          <option v-for="device in snapshot.devices" :key="device.deviceId" :value="device.deviceId">
-            {{ device.deviceName }}
-          </option>
-        </select>
-        <span class="muted">{{ rttText }}</span>
-      </div>
-      <div v-else class="row">
-        <span>{{ snapshot.devices[0].deviceName }}</span>
-        <span class="muted">{{ rttText }}</span>
-        <span class="muted">v{{ snapshot.devices[0].appVersion }}</span>
-      </div>
-    </section>
+          <!-- 滚动歌词(占满剩余高度) -->
+          <Lyrics :position-ms="positionKnown ? positionMs : -1" />
+        </template>
 
-    <!-- 正在播放 -->
-    <section class="card" v-if="activeState">
-      <h2>正在播放</h2>
-      <div class="now-playing">
-        <img v-if="artworkUrl" class="artwork" :src="artworkUrl" alt="封面" />
-        <div v-else class="artwork placeholder" @click="requestArtwork" title="点击重试获取封面">♪</div>
-        <div class="meta">
-          <div class="title">{{ activeState.track.title || '(未知标题)' }}</div>
-          <div class="artist">{{ activeState.track.artist || '(未知歌手)' }}</div>
-          <div class="album muted" v-if="activeState.track.album">{{ activeState.track.album }}</div>
-          <div class="row muted small">
-            <span>{{ activeState.app.name || activeState.app.package }}</span>
-            <span class="badge">{{ stateBadge }}</span>
+        <!-- 空态引导 -->
+        <section v-else class="hero">
+          <div class="disc"><span>♪</span></div>
+          <h2 class="hero-title">手机正在播放,这里就有歌词</h2>
+          <div class="steps">
+            <span class="step"><i>1</i>手机安装 Android Relay</span>
+            <span class="step"><i>2</i>同一 Wi-Fi 扫码配对</span>
+            <span class="step"><i>3</i>开启 LAN Push</span>
           </div>
-        </div>
-      </div>
-      <div class="progress-row">
-        <span class="mono time">{{ positionKnown ? formatTime(positionMs) : '--:--' }}</span>
-        <div class="progress">
-          <div class="progress-fill" :style="{ width: progressPct + '%' }"></div>
-        </div>
-        <span class="mono time">{{ formatTime(durationMs) }}</span>
-      </div>
-    </section>
-    <section class="card" v-else>
-      <h2>正在播放</h2>
-      <div class="muted">暂无播放信息 —— 手机端开启 LAN Push 并连接后自动显示</div>
-    </section>
+          <div class="hero-hint">{{ statusText }}<template v-if="ui.serverError">:{{ ui.serverError }}</template></div>
+          <button class="cta" @click="tab = 'settings'">前往设置 / 配对</button>
+        </section>
+      </section>
 
-    <!-- 歌词(滚动 / 纯文本 / 降级) -->
-    <Lyrics v-if="activeState" :position-ms="positionKnown ? positionMs : -1" />
+      <!-- ===== 设置页 ===== -->
+      <SettingsView v-show="tab === 'settings'" />
+    </main>
   </div>
 </template>
 
 <style scoped>
 .app {
-  padding: 12px 14px;
-  max-width: 480px;
-}
-
-.header {
+  position: relative;
+  height: 100vh;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 10px;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-1);
 }
 
-.header h1 {
-  font-size: 16px;
-  margin: 0;
+/* ===== 歌词页:常暗氛围铺满整页,顶栏与内容区共用一张连续背景(网易云「正在播放」页同思路) ===== */
+.app.on-stage {
+  background: linear-gradient(165deg, #23262e 0%, #191b21 55%, #14161b 100%);
+  color: #f2f4f8;
+}
+
+/* 深色氛围下顶栏控件切换为浅色配色 */
+.on-stage .tabs {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.on-stage .tabs button {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.on-stage .tabs button.on {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+}
+
+.on-stage .status {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ===== 顶栏 ===== */
+.topbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  flex-shrink: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #4f9cf9, #8a7bff);
+  color: #fff;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(79, 156, 249, 0.4);
+}
+
+.tabs {
+  display: inline-flex;
+  background: var(--bg-3);
+  border-radius: 10px;
+  padding: 2px;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.tabs button {
+  border: none;
+  background: transparent;
+  padding: 4px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.tabs button.on {
+  background: var(--bg-2);
+  color: var(--text-1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
 }
 
 .status {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-2);
+  white-space: nowrap;
 }
 
-.row {
+/* ===== 主视图(需在氛围背景层之上) ===== */
+.view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== 首页舞台:深色氛围背景铺在整页 .app 上(见 .on-stage),这里只做布局容器 ===== */
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 14px 12px;
+  overflow: hidden;
+}
+
+.ambience {
+  position: absolute;
+  inset: -60px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(64px) saturate(1.5) brightness(0.86);
+  opacity: 0;
+  transform: scale(1.08);
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+}
+
+.ambience.on {
+  opacity: 0.62;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(12, 14, 18, 0.28) 0%, rgba(12, 14, 18, 0.55) 100%);
+  pointer-events: none;
+}
+
+/* ===== 正在播放条 ===== */
+.np {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 4px 0;
-  flex-wrap: wrap;
-}
-
-.mono {
-  font-family: ui-monospace, Consolas, monospace;
-}
-
-.hint {
-  font-size: 11px;
-}
-
-.small {
-  font-size: 11px;
-}
-
-.settings {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 8px 0;
-  padding: 8px;
-  background: var(--bg-3);
-  border-radius: 7px;
-}
-
-.now-playing {
-  display: flex;
   gap: 12px;
-  align-items: center;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(18px) saturate(1.3);
+  flex-shrink: 0;
+}
+
+/* 断线超宽限期:整卡降饱和度,信息保留(协议 §6.3) */
+.np.offline {
+  opacity: 0.55;
+  filter: grayscale(0.9);
 }
 
 .artwork {
-  width: 72px;
-  height: 72px;
-  border-radius: 8px;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
   object-fit: cover;
   flex-shrink: 0;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 
 .artwork.placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-3);
-  color: var(--text-2);
-  font-size: 28px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 26px;
   cursor: pointer;
 }
 
-.meta {
+.np-meta {
+  flex: 1;
   min-width: 0;
 }
 
-.title {
-  font-size: 15px;
-  font-weight: 600;
+.np-title {
+  font-size: 17px;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.artist {
-  margin-top: 2px;
+.np-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.np-tags {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .badge {
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 0 6px;
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.66);
+  white-space: nowrap;
 }
 
-.progress-row {
+.badge.warn {
+  border-style: dashed;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.np-progress {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  width: 132px;
+  flex-shrink: 0;
 }
 
 .time {
   font-size: 11px;
-  color: var(--text-2);
-  min-width: 34px;
+  color: rgba(255, 255, 255, 0.55);
+  min-width: 32px;
+  text-align: center;
 }
 
 .progress {
   flex: 1;
   height: 4px;
   border-radius: 2px;
-  background: var(--bg-3);
+  background: rgba(255, 255, 255, 0.16);
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: var(--accent);
   border-radius: 2px;
+  background: linear-gradient(90deg, #4f9cf9, #9ecbff);
   transition: width 0.1s linear;
+}
+
+.mono {
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+/* ===== 空态引导 ===== */
+.hero {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  padding: 20px;
+}
+
+.disc {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.35), transparent 42%),
+    conic-gradient(from 210deg, #2c3a52, #1d2430, #35415c, #1d2430, #2c3a52);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: spin 14s linear infinite;
+}
+
+.disc span {
+  font-size: 26px;
+  color: rgba(255, 255, 255, 0.8);
+  animation: spin 14s linear infinite reverse;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hero-title {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.62);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.step i {
+  font-style: normal;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(120, 170, 255, 0.28);
+  color: #cfe3ff;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.cta {
+  margin-top: 4px;
+  padding: 8px 22px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #4f9cf9, #8a7bff);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(79, 156, 249, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 26px rgba(79, 156, 249, 0.45);
 }
 </style>

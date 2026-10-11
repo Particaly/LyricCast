@@ -29,6 +29,11 @@ import kotlin.math.abs
  * 线程模型:本类状态只在主线程读写(服务的媒体回调、Handler tick 均在主线程);
  * 封面解码/压缩在单线程 executor 完成,结果 post 回主线程发送,天然保序。
  * 本类必须由 [MediaSessionListenerService] 持有生命周期:start()/shutdown() 与服务对齐。
+ *
+ * 锁策略(v1.2):WakeLock/WifiLock 由本类经 [ConnectionLocks] 在 LAN 启用期间
+ * **全程持有**(启动获取、每 2s tick 续期、shutdown 释放),不再跟随播放状态,
+ * 也不再依赖前台服务存活——暂停/息屏/后台期间链路层 ping 与重连定时器因此保持运转,
+ * "除主动退出外不断连"由这条链保证。
  */
 class LanPushManager(private val context: Context) {
 
@@ -48,11 +53,13 @@ class LanPushManager(private val context: Context) {
     private var connected = false
     private var authFailed = false
 
-    // 各会话最新快照/控制器/活跃时刻(主线程访问),用于会话重选
-    private val latestInfos = LinkedHashMap<String, MediaInfo>()
+    // 启用期间全程持有的保活锁(start() 获取、tick 续期、shutdown() 释放;
+    // 复用同一实例避免重复 start 时旧锁泄漏)
+    private var connectionLocks: ConnectionLocks? = null
+
+    // 各会话最新快照(纯逻辑,断线期间同包覆盖、不累积)与控制器(主线程访问)
+    private val sessionCache = SessionStateCache()
     private val latestControllers = HashMap<String, MediaController>()
-    private val lastActiveAt = HashMap<String, Long>()
-    private var lastSelectedPackage: String? = null
 
     // 上次发送的快照要点,用于 seek 外推与切歌判定
     private var lastSentTrackId: String? = null
@@ -71,10 +78,12 @@ class LanPushManager(private val context: Context) {
         override fun onConnected() {
             connected = true
             authFailed = false
+            // 协议 §2.9:seq 每次连接内从 1 重新计数,snapshot 重置基准
+            seq = 0L
             LanConnectionState.update(true, "已连接")
             sendHello()
-            // 立即补发完整快照,PC 端(可能是刚启动)无需等待心跳
-            resendCurrentSnapshot("heartbeat")
+            // 立即补发全量 snapshot(协议 §2.8),PC 端(可能是刚启动/半开顶替)无需等待心跳
+            resendCurrentSnapshot("reconnect")
         }
 
         override fun onDisconnected(reason: String) {
@@ -96,28 +105,46 @@ class LanPushManager(private val context: Context) {
     // ==================== 生命周期 ====================
 
     /**
-     * 启动管理器:读取设置,若 LAN 开关打开则建立连接并启动心跳/ping 定时器。
-     * 与服务 onCreate 对齐;重复调用安全(先 shutdown 旧连接)。
+     * 启动管理器:读取设置,若 LAN 开关打开则持有保活锁、建立连接并启动心跳/ping 定时器。
+     * 与服务 onCreate 对齐;重复调用安全(锁与连接均复用/重建旧实例)。
      */
     fun start() {
         running = true
         if (!LanSettings.isEnabled(context)) {
+            // 开关刚关闭/服务重启时清掉残留的曲目展示,与"未启用"状态对齐
+            LanConnectionState.updateTrack(null)
             LanConnectionState.update(false, "未启用")
             return
         }
+        acquireLocks()
         connect()
         mainHandler.post(tickRunnable)
     }
 
-    /** 与服务 onDestroy 对齐:停定时器、断连接、释放封面线程池。 */
+    /** 与服务 onDestroy 对齐:停定时器、断连接、释放封面线程池与保活锁。 */
     fun shutdown() {
         running = false
         connected = false
+        LanConnectionState.updateTrack(null)
         mainHandler.removeCallbacksAndMessages(null)
         client?.shutdown()
         client = null
         artworkExecutor.shutdownNow()
+        connectionLocks?.releaseAll()
+        connectionLocks = null
         LanConnectionState.update(false, "未启用")
+    }
+
+    /**
+     * 获取保活锁(LAN 启用期全程持有):WakeLock 带 60s 超时靠 tick 续期,
+     * WifiLock 无超时;重复 start 复用同一 [ConnectionLocks],只等效续期。
+     */
+    private fun acquireLocks() {
+        val locks = connectionLocks ?: ConnectionLocks(
+            playbackLock = AndroidLockHandles.playback(context),
+            wifiLock = AndroidLockHandles.wifi(context)
+        ).also { connectionLocks = it }
+        locks.acquire()
     }
 
     private fun connect() {
@@ -142,24 +169,18 @@ class LanPushManager(private val context: Context) {
      */
     fun onMediaInfo(info: MediaInfo, controller: MediaController) {
         if (!running || !LanSettings.isEnabled(context)) return
-        val pkg = info.appPackage
-        lastActiveAt[pkg] = SystemClock.elapsedRealtime()
-        latestInfos[pkg] = info
-        latestControllers[pkg] = controller
+        sessionCache.update(info, SystemClock.elapsedRealtime())
+        latestControllers[info.appPackage] = controller
 
-        val selected = SessionSelector.select(
-            candidates(),
+        val selected = sessionCache.select(
             blacklist = LanSettings.blacklist(context),
             whitelist = LanSettings.whitelist(context)
-        )
-        lastSelectedPackage = selected?.packageName
-        if (selected == null) {
+        ) ?: run {
             sendNoneIfNeeded()
             return
         }
-        val selectedInfo = latestInfos[selected.packageName] ?: return
-        val selectedController = latestControllers[selected.packageName] ?: return
-        processSnapshot(selectedInfo, selectedController)
+        val selectedController = latestControllers[selected.appPackage] ?: return
+        processSnapshot(selected, selectedController)
     }
 
     // ==================== 发送策略 ====================
@@ -221,82 +242,86 @@ class LanPushManager(private val context: Context) {
 
     /**
      * 组装并发送状态快照,同时记录要点供 seek 外推与切歌判定。
-     * positionMs 一律换算为发送时刻的估算位置(协议 §4.3)。
+     * positionMs 一律换算为发送时刻的估算位置(协议 §2.3)。
+     *
+     * @param type "state"(事件/心跳)或 "snapshot"(协议 §2.8,连接建立/重发)
      */
-    private fun sendSnapshot(info: MediaInfo, reason: String, estimate: Long?) {
-        val message = JSONObject().apply {
-            put("type", "state")
-            put("v", 1)
-            put("seq", ++seq)
-            put("sentAt", System.currentTimeMillis())
-            put("reason", reason)
-            put(
-                "app",
-                JSONObject().put("package", info.appPackage).put("name", info.appName)
-            )
-            put(
-                "playback",
-                JSONObject().apply {
-                    put("state", info.playback.status.wire)
-                    put("positionMs", estimate ?: -1L)
-                    put("positionKnown", info.playback.positionKnown && estimate != null)
-                    put("speed", info.playback.speed.toDouble())
-                }
-            )
-            put(
-                "track",
-                JSONObject().apply {
-                    put("id", info.track.id)
-                    put("title", info.track.title)
-                    put("artist", info.track.artist)
-                    put("album", info.track.album)
-                    put("albumArtist", info.track.albumArtist)
-                    put("durationMs", info.track.durationMs)
-                    put("genre", info.track.genre)
-                    put("year", info.track.year)
-                    put("trackNumber", info.track.trackNumber)
-                    put("mediaId", info.track.mediaId)
-                }
-            )
-            put(
-                "artwork",
-                JSONObject().apply {
-                    put("available", info.track.artworkAvailable)
-                    put(
-                        "hash",
-                        if (artworkCache?.trackId == info.track.id) artworkCache!!.hash else ""
-                    )
-                }
-            )
-        }
+    private fun sendSnapshot(info: MediaInfo, reason: String, estimate: Long?, type: String = "state") {
+        val known = info.playback.positionKnown && estimate != null
+        val message = SnapshotJson.build(
+            type = type,
+            seq = ++seq,
+            sentAtMs = System.currentTimeMillis(),
+            reason = reason,
+            info = info.copy(
+                playback = info.playback.copy(
+                    positionMs = estimate ?: -1L,
+                    positionKnown = known
+                )
+            ),
+            artworkHash = if (artworkCache?.trackId == info.track.id) artworkCache!!.hash else ""
+        )
         send(message.toString())
 
         lastSentTrackId = info.track.id
         lastSentStatus = info.playback.status
         lastSentPositionMs = estimate ?: -1L
-        lastSentPositionKnown = info.playback.positionKnown && estimate != null
+        lastSentPositionKnown = known
         lastSentSpeed = info.playback.speed
         lastSentElapsed = SystemClock.elapsedRealtime()
-        Log.d(TAG, "Sent state seq=$seq reason=$reason pos=$estimate track=${info.track.title}")
+        // 主界面"正在推送"卡随每次快照同步(含 NONE 空快照,由调用方随后置 null)
+        LanConnectionState.updateTrack(
+            LanConnectionState.NowPlaying(
+                title = info.track.title,
+                artist = info.track.artist,
+                playing = info.playback.status == PlaybackStatus.PLAYING
+            )
+        )
+        Log.d(TAG, "Sent $type seq=$seq reason=$reason pos=$estimate track=${info.track.title}")
     }
 
     /** 无活跃会话时:把最后一首歌标记为 state=none 发出(便于 PC 展示"已停止"),只发一次。 */
     private fun sendNoneIfNeeded() {
         if (lastSentStatus == PlaybackStatus.NONE) return
-        val info = lastSelectedPackage?.let { latestInfos[it] }
-            ?: latestInfos.values.firstOrNull()
-            ?: return
+        val info = sessionCache.selectedInfo() ?: sessionCache.anyInfo() ?: return
         val nonePlayback = info.playback.copy(status = PlaybackStatus.NONE)
         sendSnapshot(info.copy(playback = nonePlayback), "playback_change", null)
+        // 无选中会话:主界面"正在推送"卡回到空态(PC 端仍保留最后一首的元数据,语义不同)
+        LanConnectionState.updateTrack(null)
     }
 
-    /** 连接建立或收到 request(state) 时补发完整快照。 */
+    /**
+     * 连接建立或收到 request(state) 时补发全量快照(协议 §2.8,type=snapshot)。
+     * 无活跃会话时发送 state=none 的空快照(沿用最后曲目元数据,PC 显示"无播放");
+     * 从未有过任何会话时无内容可发,静默等首个媒体事件。
+     */
     private fun resendCurrentSnapshot(reason: String) {
-        val pkg = lastSelectedPackage ?: return
-        val info = latestInfos[pkg] ?: return
-        val controller = latestControllers[pkg] ?: return
+        val info = sessionCache.selectedInfo()
+        if (info == null) {
+            sendNoneSnapshot(reason)
+            return
+        }
+        val controller = latestControllers[info.appPackage] ?: return
         val nowElapsed = SystemClock.elapsedRealtime()
-        sendSnapshot(info, reason, info.playback.estimatedPositionMs(nowElapsed, info.track.durationMs))
+        sendSnapshot(
+            info,
+            reason,
+            info.playback.estimatedPositionMs(nowElapsed, info.track.durationMs),
+            type = "snapshot"
+        )
+    }
+
+    /** 无活跃会话时的空快照;从未有过会话则不发(返回 false)。 */
+    private fun sendNoneSnapshot(reason: String): Boolean {
+        val info = sessionCache.anyInfo() ?: return false
+        sendSnapshot(
+            info.copy(playback = info.playback.copy(status = PlaybackStatus.NONE)),
+            reason,
+            null,
+            type = "snapshot"
+        )
+        LanConnectionState.updateTrack(null)
+        return true
     }
 
     /**
@@ -416,7 +441,7 @@ class LanPushManager(private val context: Context) {
                         send(artwork.toString())
                     }
                 }
-                "state" -> resendCurrentSnapshot("heartbeat")
+                "state" -> resendCurrentSnapshot("request") // 协议 §2.8:snapshot 应答
             }
             "hello_ack" -> Unit // 已连接状态由 onConnected 维护
             "error" -> {
@@ -441,13 +466,15 @@ class LanPushManager(private val context: Context) {
 
     /**
      * 2 秒一跳的轻量定时器:
-     * - 每 15 秒一次 ping(测 RTT + NAT 保活);
+     * - 每跳续期保活锁(LAN 启用期间 WakeLock/WifiLock 全程持有,v1.2);
+     * - 每 15 秒一次 ping(测 RTT + NAT 保活,应用层,协议 §2.6);
      * - playing 且距上次快照 ≥8 秒时补发心跳(部分 App 不再回调时兜底)。
-     * 断连期间循环保持运转(空转成本可忽略),重连后立即恢复职责。
+     * 断连期间循环保持运转(重连退避与锁续期都依赖它),重连后立即恢复职责。
      */
     private val tickRunnable = object : Runnable {
         override fun run() {
             if (!running) return
+            connectionLocks?.renew()
             if (connected) {
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastPingSentAt >= PING_INTERVAL_MS) {
@@ -459,10 +486,8 @@ class LanPushManager(private val context: Context) {
                     }
                     send(ping.toString())
                 }
-                val pkg = lastSelectedPackage
-                val info = pkg?.let { latestInfos[it] }
-                if (info != null &&
-                    info.playback.status == PlaybackStatus.PLAYING &&
+                val info = sessionCache.selectedInfo()
+                if (info?.playback?.status == PlaybackStatus.PLAYING &&
                     now - lastSentElapsed >= HEARTBEAT_INTERVAL_MS
                 ) {
                     val estimate = info.playback.estimatedPositionMs(now, info.track.durationMs)
@@ -475,18 +500,13 @@ class LanPushManager(private val context: Context) {
 
     // ==================== 工具 ====================
 
-    private fun candidates(): List<SessionSelector.Candidate> =
-        latestInfos.keys.map { pkg ->
-            SessionSelector.Candidate(
-                packageName = pkg,
-                isPlaying = latestInfos[pkg]?.playback?.status == PlaybackStatus.PLAYING,
-                lastActiveAt = lastActiveAt[pkg] ?: 0L
-            )
-        }
-
     private fun send(text: String): Boolean {
         val ok = client?.send(text) ?: false
-        if (!ok) Log.d(TAG, "Send skipped: no connection")
+        if (!ok) {
+            Log.d(TAG, "Send skipped: no connection")
+            // 断连期间来了新事件:取消退避等待,立即重连(重连后由 onConnected 补 snapshot)
+            client?.reconnectNow()
+        }
         return ok
     }
 

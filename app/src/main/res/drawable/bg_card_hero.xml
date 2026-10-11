@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  状态英雄卡底形:与 bg_card 同底色圆角,额外带 1dp 描边。
+  独立成文件是因为 MainActivity 会在运行时按连接状态改写描边颜色
+  (setStroke 会污染 drawable 缓存,必须与公共 bg_card 隔离)。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/surface_card" />
+    <corners android:radius="18dp" />
+    <stroke android:width="1dp" android:color="@color/divider" />
+</shape>

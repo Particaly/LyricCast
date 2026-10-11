@@ -92,7 +92,7 @@ window.services = {
       }
       core = new LanServerCore({ port, token, logger: console })
       core.onEvent = (event) => {
-        if (event.kind === 'snapshot' || event.kind === 'state' || event.kind === 'artwork' || event.kind === 'server-error') {
+        if (event.kind === 'snapshot' || event.kind === 'state' || event.kind === 'artwork' || event.kind === 'link' || event.kind === 'server-error') {
           emit(event)
         }
       }
@@ -140,9 +140,9 @@ window.services = {
       return core ? core.getPosition(deviceId) : null
     },
 
-    /** 活跃设备的封面。 */
+    /** 活跃设备的封面(deviceId 传 null 用活跃设备)。 */
     getArtwork(trackId) {
-      return core ? core.getArtwork(trackId) : null
+      return core ? core.getArtwork(null, trackId) : null
     },
 
     /** 请求活跃设备重发封面。 */

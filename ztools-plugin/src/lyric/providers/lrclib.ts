@@ -63,7 +63,7 @@ export const lrclibProvider: LyricProvider = {
       // 404 等:走模糊搜索
     }
 
-    // 2) 模糊搜索 + 本地挑选
+    // 2) 模糊搜索 + 本地挑选;同名候选优先挑带时间轴的(plain-only 记录仅作兜底)
     const candidates = (await fetchJson(
       `${BASE}/search?${toQuery({ track_name: query.title, artist_name: query.artist })}`,
       { headers, signal }
@@ -77,7 +77,10 @@ export const lrclibProvider: LyricProvider = {
       album: c.albumName,
       durationMs: (c.duration || 0) * 1000
     }))
-    const best = pickBestCandidate(normalized, query)
+    const withSynced = normalized.filter(
+      (c) => typeof c.syncedLyrics === 'string' && c.syncedLyrics.trim()
+    )
+    const best = pickBestCandidate(withSynced, query) ?? pickBestCandidate(normalized, query)
     return best ? recordToResult(best as LrcLibRecord) : null
   }
 }

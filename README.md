@@ -6,7 +6,8 @@
 基于开源项目 [saihgupr/android_relay](https://github.com/saihgupr/android_relay) 二次开发:
 在保留原有 **MQTT / Home Assistant** 功能的基础上,新增 **局域网推送(LAN Push)** 通道 ——
 手机把"正在播放"的媒体信息与播放进度推到局域网,PC 端通过
-[ZTools](https://github.com/ZToolsCenter/ZTools) 插件**实时显示歌曲信息、封面和与播放同步的滚动歌词**。
+[ZTools](https://github.com/ZToolsCenter/ZTools) 插件**实时显示歌曲信息、封面和与播放同步的滚动歌词**,
+并提供 **网易云音乐风格的桌面悬浮歌词**(独立置顶窗口,可拖动、可调字号/配色)。
 
 ```
 [Android 手机:android_relay] ──WebSocket(JSON, 局域网, token 配对)──▶ [PC:ZTools 插件]
@@ -48,29 +49,30 @@ adb install app/build/outputs/apk/debug/android-relay.apk
 
 App 读取"正在播放"依赖系统 MediaSession,需要**通知使用权限**:
 
-- 打开 App → Service Status → **Grant Permission** → 允许"Android Relay"访问通知;
+- 打开 App → 「通知使用权限未授权」卡片 → **去授权** → 允许"Android Relay"访问通知;
 - 如果界面跳转困难,可用 ADB:
 
 ```bash
 adb shell cmd notification allow_listener com.saihgupr.androidrelay/.MediaSessionListenerService
 ```
 
-### 3. LAN Push 设置(新增通道)
+### 3. 局域网推送设置(新增通道)
 
-打开 App 的 **LAN Push (Lyrics)** 卡片:
+打开 App,点 **扫码配对** 扫码可自动完成
+下表前两项与 Token 填写并保存;也可以按下表手动填写:
 
 | 设置 | 说明 |
 |---|---|
-| Enable LAN Push | 总开关;关闭时 LAN 通道完全静默(不影响 MQTT) |
-| PC IP / Hostname | 电脑的局域网 IP(插件首页会显示) |
-| Port | 默认 `18765`,与插件一致即可 |
-| Pairing Token | 与插件一致;**New Token** 可重新生成 |
-| Send Album Artwork | 切歌时附带封面(≤300px JPEG);关闭可再省一点流量 |
-| Ignored apps | 黑名单包名,逗号分隔(如视频类 App:`com.spotify.music` 等) |
+| 启用局域网推送 | 总开关;关闭时 LAN 通道完全静默(不影响 MQTT) |
+| 电脑 IP 或主机名 | 电脑的局域网 IP(插件「设置 → 连接」会显示) |
+| 端口 | 默认 `18765`,与插件一致即可 |
+| 配对 Token | 与插件一致;**重新生成** 可重置 |
+| 推送专辑封面 | 切歌时附带封面(≤300px JPEG);关闭可再省一点流量 |
+| 忽略的应用 | 黑名单包名,逗号分隔(如视频类 App:`com.spotify.music` 等) |
 
-填好后点 **Test Connection**(需先在 PC 端启动插件),再点 **Save LAN Settings and Reconnect**。
+填好后点 **测试连接**(需先在 PC 端启动插件),再点 **保存并重连**。
 
-**MQTT 设置卡片用法与原版完全一致**(Broker、Topic、认证、Test Connection),见
+**MQTT 设置卡(「高级」折叠卡)用法与原版完全一致**(Broker、Topic、认证、测试连接),见
 [docs/README-upstream.md](docs/README-upstream.md) 与下方 Home Assistant 配置示例。两个通道互不影响。
 
 ### Home Assistant(原 MQTT 功能,未变更)
@@ -122,36 +124,77 @@ npm install && npm run dev          # Vite dev server, http://localhost:5173
 
 ## 三、配对与验证
 
-1. PC:打开 ZTools,输入"歌词"或"lyrics"进入插件,首页显示 `IP:端口` 与 Token;
-2. 手机:App → LAN Push → 填入 IP/端口/Token → **Test Connection** → 提示 `Connected!` → 保存;
-3. 手机播放任意音乐,PC 插件应在 **2 秒内**显示歌名/歌手,歌词随即滚动;
-4. 插件页可点 **复制配置** 一次复制三要素,顺手粘到手机。
+### 方式一:扫码配对(推荐,v1.1+)
+
+1. PC:打开 ZTools,输入"歌词"或"lyrics"进入插件,首页点 **前往设置 / 配对**(或顶栏「设置」→ 连接卡)点 **配对二维码**;
+2. 手机:App → **扫码配对**,对准二维码扫一下;
+3. 地址/端口/Token 自动填入并保存重启服务,状态栏显示 `已连接` 即成功;
+4. 配对成功后 App 会依次引导**通知权限**与**后台保活**设置(可"稍后再说",见第四节)。
+
+二维码内容为 `androidrelay://pair?v=1&port=…&ip=…&token=…`(多网卡 IP 全部编入,
+手机按序尝试),格式定义见 [docs/protocol.md §7](docs/protocol.md)。
+**二维码含配对 Token,请勿截图外传。**
+
+### 方式二:手动填写(无摄像头 / 扫码不便时)
+
+1. PC:插件「设置 → 连接」显示 `IP:端口` 与 Token,可点 **复制配置** 一次复制三要素;
+2. 手机:App → 展开「局域网推送设置」卡 → 填入 IP/端口/Token → **测试连接** → 提示"连接成功" → **保存并重连**。
+
+### 验证
+
+1. 手机播放任意音乐,PC 插件应在 **2 秒内**显示歌名/歌手,歌词随即滚动;
+2. 插件「设置 → 连接」显示手机型号与实时延迟(ping/pong 测得);
 
 验证清单(对应验收标准):
 
 - 暂停/继续/拖进度/切歌/切 App → 1 秒内反映;
-- 歌词对齐误差 ≤300ms,不对就按 `+100/-100` 校准(可按本曲或按 App 记忆);
+- 歌词对齐误差 ≤300ms,不对就在 **设置 → 歌词校准** 按 `+100/-100` 校准(可按本曲或按 App 记忆);
 - Token 填错 → 握手被拒,无任何数据下发;
 - PC 重启/手机切网 → 自动重连(指数退避 1s→30s,网络恢复立即重试);
 - 手机端可用 `tools/mock-server.js` 独立调试,PC 端可用 `tools/mock-phone.js` 无手机演示(见第六节)。
 
 ## 四、后台保活(重要)
 
-App 的采集服务是 `NotificationListenerService`,由**系统**管理绑定:开机自动恢复、无需常驻前台通知。
-但国内厂商 ROM 的"省电策略"可能杀掉它:
+App 的采集服务是 `NotificationListenerService`,由**系统**管理绑定:开机自动恢复;
+连接建立后(`LanPushManager`)**全程持有** WakeLock/WifiLock——不区分播放/暂停/息屏,
+保证链路层心跳与重连定时器持续运转;另有前台服务(`RelayForegroundService`)以常驻
+通知抬高进程优先级,即使它被杀或启动失败,连接与锁也不受影响(打开 App 时会自动补拉)。
+但国内厂商 ROM 的"省电策略"仍可能杀掉/冻结它们。
 
-| 厂商 | 建议设置 |
-|---|---|
-| 通用 | 系统设置 → 电池 → 把 Android Relay 设为"不限制/无限制";关闭"电池优化" |
-| 小米/MIUI | 省电策略 → 无限制;开启"自启动";锁屏后清后台改为保留 |
-| 华为/鸿蒙 | 电池 → 启动管理 → 手动管理:允许自启动/关联启动/后台活动 |
-| OPPO/ColorOS | 允许自启动;电池 → 应用速冻中排除本应用 |
-| vivo/OriginOS | 后台耗电 → 允许后台高耗电;加速白名单中加入 |
+### 4.1 App 内的「后台保活」卡(推荐从这里开始)
 
-- **锁屏/息屏推送**:在完成上述白名单设置后,息屏 5 分钟以上推送正常(监听由系统绑定,不依赖网络常驻唤醒);
-- 若系统临时解绑,App 会通过 `onListenerDisconnected → requestRebind`(Android 7+)自动恢复;
-  若长时间失效,重新打开 App 的权限页检查监听是否仍开启;
-- Android 13+ 的通知权限:**不需要**。本应用不创建前台服务与通知,监听服务由系统绑定。
+做法参考 Gotify:**扫码配对成功后会自动弹出保活引导**,按序引导完成未完成的项;
+之后随时可在主界面「后台保活」折叠卡中查看与继续。四项自检:
+
+| 自检项 | 判定方式 | 说明 |
+|---|---|---|
+| 电池优化白名单 | 程序检测 | 系统弹窗点「允许」,即"忽略电池优化";省电策略改「无限制」 |
+| 自启动 / 后台活动 | 用户勾选确认 | 系统无 API 可查,按当前 ROM 的指引手动开启后勾选"我已完成" |
+| 多任务加锁 | 用户勾选确认 | 多任务界面锁定 Android Relay 卡片,防止一键清理被杀 |
+| 常驻通知栏 | 程序检测 | 不要关闭「后台播放推送」通知——它是前台保活的凭证;觉得碍眼可设为"静默",但别彻底禁用 |
+
+- 卡片页头有汇总状态(绿点=全部就绪,橙点=有待完成项与数量);
+- 引导弹窗与卡内「去设置」都会尝试直接跳到对应系统页(按当前 ROM 选择入口,
+  深链失效时回退应用信息页);每个弹窗均可「稍后再说」或「不再提示」;
+- 原生 Android(Pixel 等)只显示电池优化与常驻通知两项,其余自动视为"无需设置"。
+
+### 4.2 各 ROM 手动设置速查(与 App 内指引一致)
+
+| 厂商 | 自启动 / 后台活动 | 多任务加锁 |
+|---|---|---|
+| 通用 | 设置 → 电池 → Android Relay 设为「无限制/不受限」 | 多任务中长按卡片 → 锁定 |
+| 小米/MIUI/澎湃 | 打开「自启动」;省电策略 → 无限制;允许「后台弹出界面」 | 长按任务卡 → 🔒 |
+| 华为/荣耀 | 应用启动管理 → 关闭"自动管理":允许自启动/关联启动/后台活动 | 下滑任务卡 → 🔒 |
+| OPPO/一加/realme | 允许完全后台行为;自启动管理中允许自启动与关联启动 | 长按任务卡 → 锁定 |
+| vivo/iQOO | i管家 → 自启动;后台耗电 → 允许后台高耗电 | 长按任务卡 → 🔒/白名单 |
+| 三星 One UI | 电池 → 后台使用限制:移出"睡眠/深度睡眠"列表 | 点任务卡应用图标 → 锁定此应用 |
+| 魅族 Flyme | 手机管家 → 自启动管理 → 允许自启动 | 下滑任务卡 → 🔒 |
+
+- **锁屏/息屏推送**:完成上述设置后,暂停/息屏/后台期间连接与推送均保持
+  (WakeLock/WifiLock 在 LAN 启用期间全程持有,代价是待机耗电略增,见 protocol.md §9);
+- 若系统临时解绑通知监听,App 会通过 `onListenerDisconnected → requestRebind`(Android 7+)自动恢复;
+  若长时间失效,重新打开 App 检查「通知使用权限」卡是否重新出现;
+- Android 13+ 的通知权限:**需要**(常驻通知在状态栏可见,也是自检项之一)。
 
 ## 五、工作原理与协议
 
@@ -168,7 +211,7 @@ App 的采集服务是 `NotificationListenerService`,由**系统**管理绑定:�
 ```bash
 # Android 端
 ./gradlew assembleDebug            # 构建
-./gradlew testDebugUnitTest        # 19 个 JVM 单测(位置估算/会话选择/trackId)
+./gradlew testDebugUnitTest        # 65 个 JVM 单测(保活锁/保活引导/位置估算/会话选择/配对码/状态缓存等)
 
 # 插件端
 cd ztools-plugin
@@ -194,7 +237,11 @@ app/src/main/kotlin/com/saihgupr/androidrelay/
 ├── LanPushClient.kt                 # OkHttp WebSocket + 指数退避 + 网络恢复重试
 ├── LanPushManager.kt                # LAN 发送策略(锚点/心跳/seek/封面/去重)
 ├── LanSettings.kt / LanConnectionState.kt
-└── MainActivity.kt                  # 设置页(MQTT 卡 + LAN 卡)
+├── RelayLocks.kt                    # 保活锁:LAN 启用期间全程持有 WakeLock/WifiLock(纯逻辑可测)
+├── RelayForegroundService.kt        # 前台保活服务(常驻通知 + 系统优先级)
+├── KeepAliveGuide.kt                # 保活引导:ROM 识别/四项自检/系统页跳转(纯逻辑可测)
+├── QrScanActivity.kt / PairingQr.kt # 扫码配对
+└── MainActivity.kt                  # 设置页(状态卡 + 保活卡 + LAN 卡 + MQTT 卡)
 
 ztools-plugin/
 ├── src/                             # Vue3 + TS UI(歌词渲染在此)
@@ -212,13 +259,18 @@ ztools-plugin/
 歌词页顶部有 `+100/-100/+500/-500` 校准按钮;默认记在"本曲",切到"此应用"可对该 App 全部歌曲生效。
 部分 App(如某些车载模式)position 更新很慢,心跳 8 秒才校正一次属正常。
 
+**Q:息屏一会儿/一键清理后就不更新了?**
+若已按「后台保活」卡完成四项设置,暂停/息屏不应再断开(v0.6 起 WakeLock/WifiLock
+全程持有);仍中断说明进程被 ROM 杀了——按引导补齐电池优化白名单 / 自启动 /
+多任务加锁 / 常驻通知(详见第四节);一键清理后重开 App 会自动重连。
+
 **Q:显示"进度未知 --:--"?**
 系统报告 `PLAYBACK_POSITION_UNKNOWN`,协议规定不伪造位置;歌词会按暂停处理。换一首或换 App 通常恢复。
 
 **Q:封面不显示?**
 部分 App 只给 URI 或干脆没有封面。点击封面占位符会向手机重发请求;仍无则是 App 未提供。
 
-**Q:手机端 Test Connection 一直超时?**
+**Q:手机端"测试连接"一直超时?**
 ① PC 防火墙放行 18765 入站(Windows 首次监听会弹窗,选"允许");② IP 填的是 PC 的局域网 IP 而非 127.0.0.1;③ 插件已打开或开启了"跟随主程序同时启动运行"。
 
 **Q:歌词来源是什么?会不会失效?**

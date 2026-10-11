@@ -1,4 +1,131 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  全量中文文案(2026-10 界面改版):主界面所有可见文本的唯一来源,
+  布局与代码只允许引用 @string / getString(),不得再硬编码。
+-->
 <resources>
     <string name="app_name">Android Relay</string>
+    <string name="notification_stop">停止</string>
+
+    <!-- 顶栏 -->
+    <string name="header_subtitle">正在播放 → 局域网同步到 PC 歌词</string>
+
+    <!-- 状态英雄卡 -->
+    <string name="status_not_paired">尚未配对</string>
+    <string name="status_not_paired_hint">打开「局域网推送设置」或扫码配对后开始同步</string>
+    <string name="lan_target_text">正在同步到 %1$s:%2$d</string>
+    <string name="now_playing_empty">手机播放音乐后,这里会显示正在推送的歌曲</string>
+    <string name="now_playing_playing">播放中</string>
+    <string name="now_playing_paused">已暂停</string>
+
+    <!-- 权限引导卡(仅通知监听未授权时显示) -->
+    <string name="guide_listener_title">通知使用权限未授权</string>
+    <string name="guide_listener_body">需要允许 Android Relay 读取通知,才能获取“正在播放”的音乐信息</string>
+    <string name="guide_listener_action">去授权</string>
+    <string name="guide_listener_adb_toggle">无法跳转?用 ADB 授权</string>
+    <string name="guide_listener_adb_cmd">adb shell cmd notification allow_listener com.saihgupr.androidrelay/.MediaSessionListenerService</string>
+
+    <!-- 扫码配对 -->
+    <string name="pair_button">扫码配对</string>
+    <string name="pair_hint">扫描 PC 端 ZTools 插件「手机接入」卡片里的二维码,自动完成配置</string>
+
+    <!-- 局域网推送设置(折叠卡) -->
+    <string name="lan_section_title">局域网推送设置</string>
+    <string name="lan_enabled_switch">启用局域网推送</string>
+    <string name="lan_host_hint">电脑 IP 或主机名(如 192.168.1.100)</string>
+    <string name="lan_port_hint">端口(默认 18765)</string>
+    <string name="lan_token_hint">配对 Token</string>
+    <string name="lan_regen_token">重新生成</string>
+    <string name="lan_artwork_switch">推送专辑封面</string>
+    <string name="lan_blacklist_hint">忽略的应用包名,逗号分隔(可选)</string>
+    <string name="lan_test_button">测试连接</string>
+    <string name="lan_save_button">保存并重连</string>
+    <string name="lan_test_need_host">请先填写电脑地址</string>
+    <string name="lan_test_connecting">正在连接 %1$s:%2$d …</string>
+    <string name="lan_test_timeout">连接超时:%1$s 无响应,请检查 IP、端口和电脑防火墙</string>
+    <string name="lan_test_failed">无法连接:%1$s</string>
+    <string name="lan_test_ok">连接成功,Token 校验通过</string>
+    <string name="lan_test_rejected">被电脑端拒绝(%1$s),请检查两端 Token 是否一致</string>
+    <string name="lan_saved_toast">已保存,服务已重启</string>
+    <string name="lan_pair_success">扫码配对成功:%1$s,正在连接…</string>
+
+    <!-- MQTT · Home Assistant(折叠卡,高级) -->
+    <string name="mqtt_section_title">MQTT · Home Assistant</string>
+    <string name="mqtt_section_badge">高级</string>
+    <string name="mqtt_section_subtitle">与局域网推送互相独立,可同时开启</string>
+    <string name="mqtt_broker_hint">Broker 地址(如 192.168.1.199)</string>
+    <string name="mqtt_topic_hint">Topic(如 android_tv/playback_state)</string>
+    <string name="mqtt_auth_switch">MQTT 用户名密码</string>
+    <string name="mqtt_username_hint">用户名</string>
+    <string name="mqtt_password_hint">密码</string>
+    <string name="mqtt_test_button">测试连接</string>
+    <string name="mqtt_save_button">保存并重启服务</string>
+    <string name="mqtt_saved_toast">MQTT 配置已保存,服务已重新初始化</string>
+    <string name="mqtt_test_init">正在初始化…</string>
+
+    <!-- 前台服务与权限引导 -->
+    <string name="fg_start_failed">后台保活服务启动失败:%1$s</string>
+    <string name="notify_permission_denied">未授予通知权限:后台服务仍会运行,但状态栏不显示</string>
+    <string name="battery_dialog_title">保持后台连接</string>
+    <string name="battery_dialog_message">息屏后系统可能冻结应用、断开推送。\n\n建议把 Android Relay 的电池策略改为「无限制」或「忽略电池优化」,让播放信息在息屏时持续同步到 PC。</string>
+    <string name="battery_dialog_go">去授权</string>
+    <string name="battery_dialog_later">稍后再说</string>
+    <string name="battery_dialog_manual_fallback">请手动到系统设置中关闭电池优化</string>
+
+    <!-- 后台保活卡(参考 Gotify):四项自检 + 分 ROM 引导;
+         电池/通知可程序化检测,自启动/加锁由用户勾选确认 -->
+    <string name="ka_section_title">后台保活</string>
+    <string name="ka_header_all_done">自检全部通过,保活已就绪</string>
+    <string name="ka_header_pending">%1$d/%2$d 项待完成</string>
+    <string name="ka_summary_all_done">系统将尽量不回收本应用,息屏、一键清理后推送仍会持续。</string>
+    <string name="ka_summary_pending">完成剩余 %1$d 项,息屏和一键清理后也能持续把播放信息同步到 PC。</string>
+    <string name="ka_rom_label">当前系统:%1$s</string>
+    <string name="ka_state_done">已完成</string>
+    <string name="ka_state_pending">待完成</string>
+    <string name="ka_state_not_needed">无需设置</string>
+    <string name="ka_action_go">去设置</string>
+    <string name="ka_action_notification">通知设置</string>
+    <string name="ka_action_locked">已加锁</string>
+    <string name="ka_action_never">不再提示</string>
+
+    <string name="ka_battery_title">电池优化白名单</string>
+    <string name="ka_battery_desc">在 设置 → 应用管理 → Android Relay → 电池/省电策略 中改为「无限制」或「忽略电池优化」,避免息屏后被系统冻结、断开推送。</string>
+
+    <string name="ka_autostart_title">自启动 / 后台活动</string>
+    <string name="ka_autostart_confirm">我已完成上述设置</string>
+    <string name="ka_autostart_desc_miui">MIUI / 澎湃OS:① 设置 → 应用管理 → Android Relay,打开「自启动」;② 省电策略改为「无限制」;③ 允许「后台弹出界面」。</string>
+    <string name="ka_autostart_desc_huawei">EMUI / 鸿蒙:设置 → 应用 → 应用启动管理 → Android Relay,关闭「自动管理」,在手动管理中打开「允许自启动」「允许关联启动」「允许后台活动」。</string>
+    <string name="ka_autostart_desc_oppo">ColorOS:设置 → 应用 → Android Relay → 电池,允许「完全后台行为」;并在「自启动管理」中允许自启动与关联启动。同页如有「应用速冻」开关请一并关闭——速冻会在切后台/锁屏后冻结进程导致连接中断。</string>
+    <string name="ka_autostart_desc_vivo">OriginOS / Funtouch:i管家 → 权限管理 → 自启动,允许 Android Relay 自启动;并在「后台耗电」中允许后台高耗电。</string>
+    <string name="ka_autostart_desc_samsung">One UI:设置 → 电池 → 后台使用限制,把 Android Relay 移出「睡眠」/「深度睡眠」应用列表。</string>
+    <string name="ka_autostart_desc_meizu">Flyme:手机管家 → 权限管理 → 自启动管理,允许 Android Relay 自启动并保持后台运行。</string>
+    <string name="ka_autostart_desc_stock">原生 Android 无需自启动白名单;如「电池」设置中提供「无限制」选项,选择即可。</string>
+    <string name="ka_autostart_no_entry">未能打开自启动设置页,请手动进入 设置 → 应用管理 → Android Relay</string>
+
+    <string name="ka_lock_title">多任务加锁</string>
+    <string name="ka_lock_confirm">我已在多任务中加锁</string>
+    <string name="ka_lock_desc_miui">打开「多任务」界面,找到 Android Relay 卡片,长按后点「锁定」(🔒),一键清理时不会被杀。</string>
+    <string name="ka_lock_desc_huawei">打开「多任务」界面,找到 Android Relay 卡片,下滑卡片后点 🔒 锁定后台。</string>
+    <string name="ka_lock_desc_oppo">打开「多任务」界面,长按 Android Relay 卡片,选择「锁定」。</string>
+    <string name="ka_lock_desc_vivo">打开「多任务」界面,长按 Android Relay 卡片,点 🔒(或加入白名单)。</string>
+    <string name="ka_lock_desc_samsung">打开「多任务」界面,点 Android Relay 卡片上的应用图标,选择「锁定此应用」。</string>
+    <string name="ka_lock_desc_meizu">打开「多任务」界面,下滑 Android Relay 卡片,点 🔒 锁定。</string>
+    <string name="ka_lock_desc_stock">本系统无需多任务加锁,可忽略此项。</string>
+
+    <string name="ka_notification_title">常驻通知栏</string>
+    <string name="ka_notification_desc">不要关闭状态栏的「后台播放推送」通知——它是 Android 前台保活的重要凭证。若觉得碍眼,可在通知设置中将其设为「静默」或降低重要性,但不要彻底禁用。</string>
+
+    <!-- 保活引导弹窗(配对成功后按待完成项逐个弹出) -->
+    <string name="ka_step_autostart_title">允许自启动与后台活动</string>
+    <string name="ka_step_lock_title">锁定多任务后台</string>
+    <string name="ka_step_notification_title">保留常驻通知</string>
+    <string name="ka_onboarding_dismissed_toast">已关闭保活引导,可随时在「后台保活」卡中继续完成</string>
+
+    <!-- 扫码页 -->
+    <string name="scan_status_text">识别成功后将自动填入配置</string>
+    <string name="scan_hint_text">对准电脑插件「手机接入」卡片里的配对二维码</string>
+    <string name="scan_close">✕ 关闭</string>
+
+    <!-- 页脚 -->
+    <string name="footer_version">v1.3.0 · 协议 v1</string>
 </resources>

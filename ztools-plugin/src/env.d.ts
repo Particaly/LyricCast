@@ -24,6 +24,10 @@ export interface DeviceInfo {
   clockOffsetMs: number
   connectedAt: number
   hasState: boolean
+  /** 链路展示状态:connected | stale(playing 超 24s 无应用消息) | lapsed(断线宽限期) */
+  link?: string
+  lastAppMessageAt?: number
+  disconnectedAt?: number | null
 }
 
 export interface LanSnapshot {
@@ -35,17 +39,28 @@ export interface LanSnapshot {
   token: string
 }
 
+/** state 事件附带的插值锚点元数据(PC 时钟) */
+export interface StateMeta {
+  recvAt: number
+  clockOffsetMs: number
+  lastAppMessageAt: number
+}
+
 export interface ServerEvent {
-  kind: 'snapshot' | 'state' | 'artwork' | 'server-error'
+  kind: 'snapshot' | 'state' | 'artwork' | 'link' | 'server-error'
   message?: string
   deviceId?: string
   state?: ProtocolStateMessage
+  /** state 事件的插值元数据;link 事件携带断开时刻 */
+  meta?: StateMeta
+  disconnectedAt?: number
   trackId?: string
   artwork?: ArtworkData
 }
 
-/** docs/protocol.md v1 的 state 消息(仅 UI 关心的字段) */
+/** docs/protocol.md v1.1 的 state/snapshot 消息(仅 UI 关心的字段;载荷同构) */
 export interface ProtocolStateMessage {
+  type?: string
   seq: number
   sentAt: number
   reason: string
