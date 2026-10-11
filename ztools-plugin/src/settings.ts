@@ -30,6 +30,8 @@ export interface Settings {
   providerLrclib: boolean
   /** 歌词来源:网易云(中文回退)开关 */
   providerNetease: boolean
+  /** 歌词来源:酷狗(中文补充)开关 */
+  providerKugou: boolean
   /** 并行请求各来源(时间预算模式);关闭退化为按路由顺序串行 */
   parallelProviders: boolean
   /** 主界面滚动歌词字号(px) */
@@ -50,6 +52,7 @@ export const MAIN_FONT_RANGE = { min: 12, max: 30 }
 const DEFAULTS: Settings = {
   providerLrclib: true,
   providerNetease: true,
+  providerKugou: true,
   parallelProviders: true,
   desktopEnabled: false,
   desktopFontSize: 26,
@@ -80,6 +83,7 @@ function sanitize(raw: unknown): Settings {
   return {
     providerLrclib: typeof input.providerLrclib === 'boolean' ? input.providerLrclib : DEFAULTS.providerLrclib,
     providerNetease: typeof input.providerNetease === 'boolean' ? input.providerNetease : DEFAULTS.providerNetease,
+    providerKugou: typeof input.providerKugou === 'boolean' ? input.providerKugou : DEFAULTS.providerKugou,
     parallelProviders:
       typeof input.parallelProviders === 'boolean' ? input.parallelProviders : DEFAULTS.parallelProviders,
     desktopEnabled: typeof input.desktopEnabled === 'boolean' ? input.desktopEnabled : DEFAULTS.desktopEnabled,

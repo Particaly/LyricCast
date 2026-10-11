@@ -307,6 +307,20 @@ function regenerateToken() {
         </div>
         <div class="setting-row">
           <div class="setting-label">
+            <div class="setting-title">酷狗音乐(中文补充)</div>
+            <div class="setting-hint">非官方接口,只有普通 LRC(无独立翻译);失败自动回退</div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.providerKugou"
+              @change="updateSettings({ providerKugou: ($event.target as HTMLInputElement).checked })"
+            />
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
             <div class="setting-title">并行搜索所有来源</div>
             <div class="setting-hint">同时请求各来源,高置信结果立即返回;关闭则按顺序逐个尝试</div>
           </div>

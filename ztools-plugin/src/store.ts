@@ -17,6 +17,7 @@ import { OffsetStore, type OffsetScope } from './lyric/offsets'
 import { createMemoryStorage, type KVStorage } from './lyric/cache'
 import { lrclibProvider } from './lyric/providers/lrclib'
 import { neteaseProvider } from './lyric/providers/netease'
+import { kugouProvider } from './lyric/providers/kugou'
 import { loadSettings, settings } from './settings'
 
 export interface ArtworkEntry {
@@ -116,11 +117,14 @@ const devProvider = (window as any)?.__devLyricProvider as LyricProvider | undef
 // 来源开关与并行模式接 settings,设置页可实时切换。
 const lyricManager = new LyricsManager({
   storage: storageAdapter(),
-  providers: devProvider ? [devProvider, lrclibProvider, neteaseProvider] : [lrclibProvider, neteaseProvider],
+  providers: devProvider
+    ? [devProvider, lrclibProvider, neteaseProvider, kugouProvider]
+    : [lrclibProvider, neteaseProvider, kugouProvider],
   parallel: () => settings.parallelProviders,
   isProviderEnabled: (name) => {
     if (name === lrclibProvider.name) return settings.providerLrclib
     if (name === neteaseProvider.name) return settings.providerNetease
+    if (name === kugouProvider.name) return settings.providerKugou
     return true
   }
 })
