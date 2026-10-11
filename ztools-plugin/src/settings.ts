@@ -36,6 +36,8 @@ export interface Settings {
   providerLrcmux: boolean
   /** 歌词来源:Better Lyrics(TTML 逐字,热歌缓存命中)开关 */
   providerBetterLyrics: boolean
+  /** Better Lyrics API 的 X-API-Key(空 = 不带头;401 按未命中跳过) */
+  betterLyricsApiKey: string
   /** 并行请求各来源(时间预算模式);关闭退化为按路由顺序串行 */
   parallelProviders: boolean
   /** 主界面滚动歌词字号(px) */
@@ -59,6 +61,7 @@ const DEFAULTS: Settings = {
   providerKugou: true,
   providerLrcmux: true,
   providerBetterLyrics: true,
+  betterLyricsApiKey: '',
   parallelProviders: true,
   desktopEnabled: false,
   desktopFontSize: 26,
@@ -93,6 +96,7 @@ function sanitize(raw: unknown): Settings {
     providerLrcmux: typeof input.providerLrcmux === 'boolean' ? input.providerLrcmux : DEFAULTS.providerLrcmux,
     providerBetterLyrics:
       typeof input.providerBetterLyrics === 'boolean' ? input.providerBetterLyrics : DEFAULTS.providerBetterLyrics,
+    betterLyricsApiKey: typeof input.betterLyricsApiKey === 'string' ? input.betterLyricsApiKey : DEFAULTS.betterLyricsApiKey,
     parallelProviders:
       typeof input.parallelProviders === 'boolean' ? input.parallelProviders : DEFAULTS.parallelProviders,
     desktopEnabled: typeof input.desktopEnabled === 'boolean' ? input.desktopEnabled : DEFAULTS.desktopEnabled,

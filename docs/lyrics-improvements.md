@@ -134,6 +134,20 @@ QQ 音乐需要 sign 计算且接口变化频繁,在无真实联调条件下风�
   联调通过:命中/404/400 三条路径)。
 - 逐字渲染仍未实现(行级 + 增强标签保留),与阶段 1 的 isEnhanced 语义一致。
 
+## 增量:Better Lyrics 密钥导入(2026-10-11 第三轮)
+
+- 设置页新增「Better Lyrics 密钥」导入:粘贴浏览器插件导出的密钥 JSON
+  (`{version,keyId,publicKey,privateKey,…}`,自动提取 keyId)或直接的 API key
+  字符串,存为 `betterLyricsApiKey`;请求时作为 `X-API-Key` 头发送(服务端为纯
+  字符串比对)。无效 key 仅 401,按未命中静默跳过,不写负缓存。
+- **重要事实(实测)**:浏览器插件导出的 JSON 是 Unison 众包签名身份(ECDSA
+  密钥对),**不是** lyrics API 的 key —— keyId/privateKey.d 作为 X-API-Key 实测
+  均 `401 invalid`;官方文档明确"API key 暂不向新用户发放"。该导入功能对"将来
+  拿到官方 key"或自建部署(自行配置 API_KEY)有效。
+- 官方 workaround(冷门歌拿不到词时):**用 Better Lyrics 浏览器扩展播放该曲
+  一次**让响应进入服务端缓存,之后任何客户端都能免 key 读取;热歌基本都已在
+  缓存内,无 key 也正常。
+
 ## 新增配置项(插件设置页「歌词显示」区块)
 
 | 名称 | 默认 | 含义 |
@@ -143,6 +157,7 @@ QQ 音乐需要 sign 计算且接口变化频繁,在无真实联调条件下风�
 | `providerKugou` | 开 | 酷狗(中文补充,非官方接口)开关 |
 | `providerLrcmux` | 开 | lrcmux 聚合源开关(LRCLIB/Musixmatch/酷狗/Genius 等) |
 | `providerBetterLyrics` | 开 | Better Lyrics(TTML 逐字,未缓存新歌需 API key)开关 |
+| `betterLyricsApiKey` | 空 | Better Lyrics 的 X-API-Key;设置页「导入密钥」写入 |
 | `parallelProviders` | 开 | 并行时间预算模式;关闭退化为按路由顺序串行 |
 
 Android 端新增:`lan_diagnostic_log`(默认关)——媒体会话诊断日志开关。

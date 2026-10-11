@@ -4,9 +4,10 @@
  * 裁剪至前 2 个 <p>)。连通性与形态已人工验证:200 {ttml} / 404 {error} / 401 需 API key;
  * 测试走 fixture,不做真实网络。
  */
-import { describe, expect, it } from 'vitest'
-import { betterLyricsProvider, parseTtmlTime, ttmlToLrc } from './betterlyrics'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { betterLyricsProvider, parseBetterLyricsExport, parseTtmlTime, ttmlToLrc } from './betterlyrics'
 import { parseLrc } from '../parse-lrc'
+import { settings } from '../../settings'
 
 /** 录制的 TTML(截取 tt 头与前两行;itunes:timing="Word" 音节级) */
 const TTML_SAMPLE =
@@ -76,5 +77,64 @@ describe('betterLyricsProvider', () => {
       return null
     })
     void outcome
+  })
+})
+
+/** 与浏览器插件导出格式一致(内容脱敏)的样例 */
+const EXPORT_SAMPLE =
+  '{"version":1,"keyId":"d7dc55060995dc76fbef2fee5f8d300eb5c05d388d47941b0bca6d024e1d6639",' +
+  '"publicKey":{"crv":"P-256","kty":"EC","x":"x-x","y":"y-y"},"privateKey":{"crv":"P-256","d":"d-d","kty":"EC"},"exportedAt":1791710665270}'
+
+describe('parseBetterLyricsExport', () => {
+  it('识别导出 JSON 并提取 keyId', () => {
+    expect(parseBetterLyricsExport(EXPORT_SAMPLE)).toBe(
+      'd7dc55060995dc76fbef2fee5f8d300eb5c05d388d47941b0bca6d024e1d6639'
+    )
+  })
+
+  it('纯 key 字符串/非法 JSON/缺字段返回 null', () => {
+    expect(parseBetterLyricsExport('my-plain-api-key')).toBeNull()
+    expect(parseBetterLyricsExport('{not json')).toBeNull()
+    expect(parseBetterLyricsExport('{"version":1,"keyId":"tooshort"}')).toBeNull()
+    expect(parseBetterLyricsExport('{"version":1,"keyId":"' + 'a'.repeat(64) + '"}')).toBeNull() // 无 privateKey
+    expect(parseBetterLyricsExport('')).toBeNull()
+  })
+})
+
+describe('X-API-Key 请求头(任务:导入密钥)', () => {
+  const QUERY = { title: '晴天', artist: '周杰伦', album: '', durationMs: 269_000 }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    settings.betterLyricsApiKey = ''
+  })
+
+  async function captureHeaders(): Promise<Record<string, string> | null> {
+    let captured: Record<string, string> | null = null
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      captured = Object.fromEntries(new Headers(init?.headers).entries()) as Record<string, string>
+      return new Response(JSON.stringify({ ttml: TTML_SAMPLE }), { status: 200 })
+    }))
+    await betterLyricsProvider.search(QUERY, new AbortController().signal)
+    return captured
+  }
+
+  it('设置密钥后请求带 X-API-Key', async () => {
+    settings.betterLyricsApiKey = 'my-test-key-123'
+    const headers = await captureHeaders()
+    expect(headers?.['x-api-key']).toBe('my-test-key-123')
+  })
+
+  it('未设置密钥时不带头(公共实例缓存命中也免 key)', async () => {
+    settings.betterLyricsApiKey = ''
+    const headers = await captureHeaders()
+    expect(headers?.['x-api-key']).toBeUndefined()
+  })
+
+  it('带无效 key 时 401 仍按未命中(不抛错)', async () => {
+    settings.betterLyricsApiKey = 'invalid-key'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Invalid API key' }), { status: 401 })))
+    const outcome = await betterLyricsProvider.search(QUERY, new AbortController().signal)
+    expect(outcome.status).toBe('not_found')
   })
 })
