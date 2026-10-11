@@ -18,7 +18,7 @@ const TIMEOUT_MS = 5_000
 const MAX_SEARCH_REQUESTS = 3
 const HEADERS = {
   Referer: 'https://music.163.com/',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) lan-lyrics-plugin/0.2'
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) lyriccast-plugin/0.2'
 }
 
 interface NeteaseArtist {

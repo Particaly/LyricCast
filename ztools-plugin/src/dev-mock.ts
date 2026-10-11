@@ -38,6 +38,8 @@ const DURATION_MS = 96_000
 const DEVICE_ID = 'mock-phone'
 /** ?empty=1:不推送任何播放状态,用于预览未配对空态 */
 const EMPTY_MODE = typeof location !== 'undefined' && location.search.includes('empty')
+/** ?noart=1:不推送封面,用于手动验证封面 API 兜底(等宽限期后应出现 API 拉取的封面) */
+const NO_ART_MODE = typeof location !== 'undefined' && location.search.includes('noart')
 
 const subscribers: Array<(event: ServerEvent) => void> = []
 let seq = 0
@@ -159,7 +161,7 @@ export function installDevMock(): boolean {  if (typeof window === 'undefined' |
           }, 8_000)
         }
         emit({ kind: 'snapshot' })
-        if (!EMPTY_MODE) emitArtwork()
+        if (!EMPTY_MODE && !NO_ART_MODE) emitArtwork()
         return { ok: true }
       },
       stop() {
@@ -170,7 +172,9 @@ export function installDevMock(): boolean {  if (typeof window === 'undefined' |
       setActiveDevice() { /* 单设备 */ },
       getPosition: () => null,
       getArtwork: () => null,
-      requestArtwork: () => emitArtwork(),
+      requestArtwork: () => {
+        if (!NO_ART_MODE) emitArtwork()
+      },
       requestState: () => { if (!EMPTY_MODE) emitState() },
       subscribe(cb: (event: ServerEvent) => void) {
         subscribers.push(cb)

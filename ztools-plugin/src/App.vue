@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * LAN 歌词主界面:
+ * 词投 LyricCast 主界面:
  * - 「歌词」首页 = 网易云「正在播放」页:封面氛围背景 + 正在播放条 + 全高滚动歌词;
  * - 「设置」页 = 桌面歌词 / 歌词显示 / 校准 / 连接(端口、Token、配对二维码)/ 关于;
  * - 桌面歌词:独立置顶透明窗口(desktop-bridge),主界面 rAF tick 顺带驱动其状态推送。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { activeArtwork, displayAnchor, initStore, ui } from './store'
+import { activeCoverUrl, displayAnchor, initStore, markCoverBroken, retryCover, ui } from './store'
 import { renderProgress, type LinkStatus } from './progress'
 import { settings } from './settings'
 import { disableDesktopLyrics, enableDesktopLyrics, notifyStyleChanged } from './desktop-bridge'
@@ -82,10 +82,8 @@ const progressPct = computed(() =>
 /** 进度未知时 UI 显示 --:-- 而不是伪造 0:00 */
 const positionKnown = computed(() => position.value?.known ?? false)
 
-const artworkUrl = computed(() => {
-  const artwork = activeArtwork.value
-  return artwork ? `data:${artwork.mime};base64,${artwork.dataBase64}` : ''
-})
+/** 展示用封面:手机推送封面优先,API 兜底封面其次(store.activeCoverUrl 统一裁决) */
+const artworkUrl = activeCoverUrl
 
 function formatTime(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
@@ -135,6 +133,7 @@ watch(
   () => [
     settings.desktopFontSize,
     settings.desktopTheme,
+    settings.desktopAlign,
     settings.desktopTranslation,
     settings.desktopLocked,
     settings.desktopOpacity,
@@ -144,15 +143,22 @@ watch(
   () => notifyStyleChanged()
 )
 
+/** 占位符点击重试:手机重发封面 + 立即走一次封面 API 兜底(绕过负缓存) */
 function requestArtwork() {
-  window.services.lanLyrics.requestArtwork()
+  try {
+    window.services.lanLyrics.requestArtwork()
+  } catch (_) { /* 非 ZTools 环境(纯浏览器调试) */ }
+  retryCover()
 }
 
 onMounted(async () => {
-  // 后台运行场景:插件视图被隐藏时 Vue 不一定 unmount,悬浮窗交给 onPluginOut 统一清理,
-  // 保证「跟随主程序运行」时桌面歌词常驻
+  // onPluginOut 在「转入后台」和「完全退出」时都会触发,靠 processExit 区分:
+  // 转后台(false)时悬浮窗必须常驻 —— bridge 自持定时器不依赖主窗口,后台继续换行;
+  // 只有完全退出(true)才销毁,否则插件一隐藏桌面歌词就跟着消失
   try {
-    window.ztools?.onPluginOut?.(() => disableDesktopLyrics())
+    window.ztools?.onPluginOut?.((processExit) => {
+      if (processExit) disableDesktopLyrics()
+    })
   } catch (_) { /* 非 ZTools 环境 */ }
   cleanupRef.value = await initStore()
   rafId = requestAnimationFrame(tick)
@@ -178,7 +184,7 @@ onUnmounted(() => {
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark">♪</span>
-        <span class="brand-name">LAN 歌词</span>
+        <span class="brand-name">词投 LyricCast</span>
       </div>
       <nav class="tabs">
         <button :class="{ on: tab === 'lyrics' }" @click="tab = 'lyrics'">歌词</button>
@@ -195,7 +201,13 @@ onUnmounted(() => {
         <template v-if="displayState">
           <!-- 正在播放条(断线超宽限期整卡灰化,信息保留) -->
           <section class="np" :class="{ offline }">
-            <img v-if="artworkUrl" class="artwork" :src="artworkUrl" alt="封面" />
+            <img
+              v-if="artworkUrl"
+              class="artwork"
+              :src="artworkUrl"
+              alt="封面"
+              @error="markCoverBroken"
+            />
             <div
               v-else
               class="artwork placeholder"

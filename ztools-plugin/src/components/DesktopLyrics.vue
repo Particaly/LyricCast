@@ -2,6 +2,11 @@
 /**
  * 桌面悬浮歌词胶囊(独立透明窗口的整页 UI)。
  * - 状态来自 desktop-state(主窗口推送),本地不做任何网络/服务调用;
+ * - 歌词展示:ok 状态用推送的整首行文本自建统一行高的滚动轨道,裁剪窗口保持
+ *   旧版 2 行视图(开翻译 = 当前句 + 译文;关翻译 = 当前句 + 下一句),窗口在
+ *   胶囊内垂直居中;行推进经 CSS transform 过渡平滑上滑一行(与首页歌词同款
+ *   手感),seek/切歌等跨行跳变直接落位;文本水平对齐(左/居中)可设置;
+ *   其余状态回落主行/副行占位文案;
  * - 进度条按推送锚点 + speed 本地插值(rAF),推送频率无需高;
  * - 整个胶囊为拖动区(-webkit-app-region),顶部居中悬停浮现快捷工具栏
  *   (字号±/翻译/锁定/背景不透明度/配色/关闭);锁定后禁止拖动、工具栏只留解锁;
@@ -70,11 +75,12 @@ function tick(now: number) {
 rafId = requestAnimationFrame(tick)
 onUnmounted(() => cancelAnimationFrame(rafId))
 
-// ===== 展示内容:状态 → 主行/副行文案 =====
+// ===== 展示内容:状态 → 主行/副行占位文案(ok 状态由下方歌词轨道接管) =====
 const mainText = computed(() => {
   switch (desktopState.status) {
     case 'ok':
-      return desktopState.line || '♪'
+      // 行数据正常时走歌词轨道;异常空数据兜底为音符占位
+      return '♪'
     case 'loading':
       return '歌词搜索中…'
     case 'nolyrics':
@@ -95,8 +101,6 @@ const trackLine = computed(() => {
 const subText = computed(() => {
   switch (desktopState.status) {
     case 'ok':
-      // 开翻译优先展示当前句翻译;否则预告下一句(网易云同款)
-      return desktopState.translation || desktopState.next || ''
     case 'loading':
     case 'nolyrics':
       return trackLine.value
@@ -113,6 +117,57 @@ const locked = computed(() => !!desktopState.style.locked)
 const translationOn = computed(() => !!desktopState.style.translation)
 /** 主窗口轮询光标判定:光标在悬浮窗内(拖拽区收不到鼠标事件,CSS :hover 不可用) */
 const hovered = computed(() => !!desktopState.hovered)
+
+// ===== 歌词轨道:整首行文本 + 平行译文,统一行高,2 行窗口内平滑滚动 =====
+/** 轨道是否接管展示:仅 ok 且携带行数据;其余状态回落主行/副行占位 */
+const hasTrack = computed(() => desktopState.status === 'ok' && desktopState.lines.length > 0)
+
+/** 当前行下标:非 ok 状态统一按 -1 处理(占位态不渲染轨道,仅保持偏移公式一致) */
+const activeIndex = computed(() => (desktopState.status === 'ok' ? desktopState.activeIndex : -1))
+
+/** 译文行展开高度:与 .trans.open 的 CSS 高度保持同源,供行高计算使用 */
+const transHeight = computed(() => Math.ceil(Math.max(12, fontSize.value * 0.5) * 1.3))
+
+/** 轨道统一行高 = 主行盒高(fs×1.22)+ 开翻译时的译文槽;
+ * 全部行同高,当前行放大与译文展开都收在行内,不影响定位公式 */
+const rowHeight = computed(() =>
+  Math.ceil(fontSize.value * 1.22) + (translationOn.value ? transHeight.value : 0)
+)
+
+/** 当前行译文:翻译开关开启且有对应译文时展开在当前行下方(仅当前行) */
+const activeTranslation = computed(() => {
+  if (!translationOn.value) return ''
+  const index = activeIndex.value
+  if (index < 0) return ''
+  return desktopState.translations[index] ?? ''
+})
+
+// 裁剪窗口保持旧版 2 行视图:开翻译 = 当前句 + 译文(1 个行高,译文槽收在行内),
+// 关翻译 = 当前句 + 下一句(2 个行高);窗口在胶囊内垂直居中(与旧版几何一致),
+// 轨道 offset = -index×行高,行推进经 CSS transform 过渡上滑一行,无需测量视口
+const windowHeight = computed(() => (translationOn.value ? rowHeight.value : rowHeight.value * 2))
+
+/** 轨道定位用的行下标:尚未唱到第一句时按 0 处理,第一行停在窗口主行位,进场不突兀 */
+const trackIndex = computed(() => Math.max(0, activeIndex.value))
+
+/** 文本水平对齐:左对齐(默认,旧版观感)/ 居中 */
+const alignMode = computed(() => (desktopState.style.align === 'center' ? 'center' : 'left'))
+
+const containerOffset = ref(0)
+const animate = ref(true)
+
+watch(
+  [trackIndex, rowHeight, () => desktopState.linesVersion],
+  ([index, rowH, version], previous) => {
+    const previousIndex = previous ? previous[0] : -2
+    // 三类直接落位(不播滚动动画):首次到位;行高变化(字号/翻译开关调整,过渡只会拖尾);
+    // linesVersion 变化 = 歌词整体重建(切歌/重新匹配)。行推进 |Δ|≤3 播滚动动画
+    const snap = !previous || rowH !== previous[1] || version !== previous[2]
+    animate.value = !snap && Math.abs(index - previousIndex) <= 3
+    containerOffset.value = -index * rowH
+  },
+  { immediate: true }
+)
 
 // ===== 背景不透明度:推送值兜底,滑杆拖动期间用本地值即时预览 =====
 // 与设置页共用 0~100 区间;经消息回传主窗口持久化,推送值一有变化即撤销本地预览
@@ -275,9 +330,37 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
     }"
   >
     <div class="pill" :class="{ locked, hovered, resizing }" :style="pillAnchorStyle">
-      <div class="lines">
-        <div class="line-main" :class="{ dim: dimMain }">{{ mainText }}</div>
-        <div class="line-sub" v-if="subText">{{ subText }}</div>
+      <div class="lines" :style="{ '--trans-h': transHeight + 'px', '--win-h': windowHeight + 'px' }">
+        <!-- 歌词窗口:2 行视图(当前句 + 翻译/下一句)垂直居中,内部轨道随行推进平滑上滑 -->
+        <div
+          v-if="hasTrack"
+          class="window"
+          :class="alignMode === 'left' ? 'align-left' : 'align-center'"
+        >
+          <div
+            class="scroll"
+            :class="{ animate }"
+            :style="{ transform: `translateY(${containerOffset}px)` }"
+          >
+            <div
+              v-for="(line, index) in desktopState.lines"
+              :key="index"
+              class="row"
+              :class="{ active: index === activeIndex }"
+              :style="{ height: rowHeight + 'px' }"
+            >
+              <div class="text">{{ line }}</div>
+              <div class="trans" :class="{ open: index === activeIndex && activeTranslation }">
+                <span v-if="index === activeIndex && activeTranslation">{{ activeTranslation }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 降级态占位(搜索中/无歌词/断开/等待播放):主行 + 副行 -->
+        <div v-else class="pair">
+          <div class="line-main" :class="{ dim: dimMain }">{{ mainText }}</div>
+          <div class="line-sub" v-if="subText">{{ subText }}</div>
+        </div>
       </div>
       <div class="bar">
         <div class="bar-fill" :style="{ width: progressPct + '%' }"></div>
@@ -294,6 +377,13 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
             @click="desktopAction({ type: 'translation' })"
           >
             译
+          </button>
+          <button
+            class="ctl"
+            :title="`对齐:${alignMode === 'left' ? '左对齐' : '居中'}(点击切换)`"
+            @click="desktopAction({ type: 'align' })"
+          >
+            {{ alignMode === 'left' ? '左' : '中' }}
           </button>
           <button
             class="ctl"
@@ -389,12 +479,105 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
   box-shadow: 0 8px 32px rgba(0, 0, 0, calc(var(--pill-alpha, 0.9) * 0.18));
 }
 
+/* 歌词视口:占满胶囊内高(align-self 覆盖 .pill 的 align-items:center),
+   裁剪窗口在其中垂直居中,与旧版双行观感一致 */
 .lines {
   flex: 1;
   min-width: 0;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 歌词窗口:高度 = 开翻译 1 行 / 关翻译 2 行(--win-h),窗口外行一律裁掉;
+   上下 5px 渐隐软化行进出窗口边缘的硬切割 */
+.window {
+  height: var(--win-h, 64px);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 5px, #000 calc(100% - 5px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 5px, #000 calc(100% - 5px), transparent 100%);
+}
+
+/* 降级态占位(主行 + 副行),保持与旧版一致的居中双行观感 */
+.pair {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   gap: 1px;
+}
+
+.scroll {
+  will-change: transform;
+}
+
+.scroll.animate {
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 统一行高轨道:行内垂直居中;当前行文字放大加亮,推进时随轨道一起上滑
+   (字号过渡让「下一句」在滑入主行位的过程中长大,与首页同款 morph) */
+.row {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 对齐方式:左对齐(旧版观感)/ 居中,作用于行内文字与译文 */
+.window.align-left .row {
+  align-items: flex-start;
+}
+
+.window.align-left .text {
+  text-align: left;
+}
+
+.window.align-center .row {
+  align-items: center;
+}
+
+.window.align-center .text {
+  text-align: center;
+}
+
+.row .text {
+  max-width: 100%;
+  font-size: calc(var(--fs) * 0.5);
+  line-height: 1.22;
+  font-weight: 500;
+  opacity: 0.62;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: font-size 0.3s, opacity 0.3s;
+}
+
+.row.active .text {
+  font-size: var(--fs);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.stage.dark .row.active .text {
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* 译文槽:仅当前行展开,高度收在统一行高内,不改变行盒(与首页同款手法) */
+.trans {
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  font-size: max(12px, calc(var(--fs) * 0.5));
+  line-height: 1.3;
+  transition: height 0.25s, opacity 0.25s;
+}
+
+.trans.open {
+  height: var(--trans-h, 17px);
+  opacity: 0.62;
 }
 
 .line-main {

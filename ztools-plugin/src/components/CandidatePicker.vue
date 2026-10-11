@@ -1,14 +1,18 @@
 <script setup lang="ts">
 /**
  * 候选面板(任务 3.1"歌词不对?换一个"):
+ * - 顶部"正在播放"参考条:当前曲目的歌名/歌手/时长,选词对照用;
  * - 列出各来源的候选(标题/歌手/专辑/时长/来源徽标 + 时间轴/翻译/纯文本标记);
+ * - 当前已固定的候选高亮并带"当前"徽标(按 source+id 匹配,历史固定/无 id 候选无从
+ *   匹配则不标);
  * - 点击立即固定展示并写入缓存(userPinned,优先于自动匹配);
  * - 底部"恢复自动匹配"清除固定;关闭面板即取消在途候选请求。
  * 覆盖层渲染在主页舞台之上(App.vue),深色玻璃拟态与主界面一致。
  */
 import { computed } from 'vue'
-import { candidatePicker, chooseCandidate, closeCandidatePicker, unpinCurrent } from '../store'
+import { candidatePicker, chooseCandidate, closeCandidatePicker, unpinCurrent, nowPlayingInfo } from '../store'
 import { lyric } from '../store'
+import type { PickerCandidate } from '../lyric/types'
 
 function formatDuration(ms?: number): string {
   if (!ms || ms <= 0) return '--:--'
@@ -19,6 +23,12 @@ function formatDuration(ms?: number): string {
 }
 
 const showRestore = computed(() => lyric.pinned)
+
+/** 该候选是否为当前已固定项(source+id 双重匹配;无 id 的候选无法标识) */
+function isCurrent(item: PickerCandidate): boolean {
+  const cur = candidatePicker.current
+  return !!cur && !!item.id && item.source === cur.source && item.id === cur.id
+}
 </script>
 
 <template>
@@ -34,6 +44,15 @@ const showRestore = computed(() => lyric.pinned)
             <button class="close" aria-label="关闭" @click="closeCandidatePicker">×</button>
           </header>
 
+          <div v-if="nowPlayingInfo" class="now-playing">
+            <span class="np-label">正在播放</span>
+            <span class="np-main">
+              <span class="np-title" :title="nowPlayingInfo.title">{{ nowPlayingInfo.title }}</span>
+              <span class="np-sub" :title="nowPlayingInfo.artist">{{ nowPlayingInfo.artist }}</span>
+            </span>
+            <span class="np-dur mono">{{ formatDuration(nowPlayingInfo.durationMs) }}</span>
+          </div>
+
           <div class="list">
             <div v-if="candidatePicker.loading" class="placeholder">
               <span class="pulse">候选搜索中<i>…</i></span>
@@ -44,6 +63,7 @@ const showRestore = computed(() => lyric.pinned)
                 v-for="(item, index) in candidatePicker.items"
                 :key="`${item.source}-${item.id ?? index}`"
                 class="candidate"
+                :class="{ active: isCurrent(item) }"
                 :disabled="candidatePicker.loading"
                 @click="chooseCandidate(item)"
               >
@@ -55,6 +75,7 @@ const showRestore = computed(() => lyric.pinned)
                 </span>
                 <span class="c-side">
                   <span class="c-badges">
+                    <span v-if="isCurrent(item)" class="tag current">当前</span>
                     <span class="tag source">{{ item.source }}</span>
                     <span v-if="item.synced" class="tag">时间轴</span>
                     <span v-else-if="item.plain" class="tag">纯文本</span>
@@ -123,6 +144,11 @@ const showRestore = computed(() => lyric.pinned)
 }
 
 .close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
   border: none;
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.7);
@@ -137,6 +163,57 @@ const showRestore = computed(() => lyric.pinned)
 .close:hover {
   background: rgba(255, 255, 255, 0.16);
   color: #fff;
+}
+
+.now-playing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.np-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px dashed rgba(150, 190, 255, 0.4);
+  color: rgba(150, 190, 255, 0.75);
+}
+
+.np-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.np-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.np-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.np-dur {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .list {
@@ -162,6 +239,13 @@ const showRestore = computed(() => lyric.pinned)
 
 .candidate:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* 当前固定项:淡蓝底 + 左侧描边;写在 hover 之后,悬停时不被通用底色覆盖 */
+.candidate.active,
+.candidate.active:hover {
+  background: rgba(96, 165, 250, 0.12);
+  box-shadow: inset 2px 0 0 rgba(96, 165, 250, 0.7);
 }
 
 .candidate:disabled {
@@ -219,6 +303,12 @@ const showRestore = computed(() => lyric.pinned)
 .tag.source {
   border-style: dashed;
   color: rgba(150, 190, 255, 0.75);
+}
+
+.tag.current {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(96, 165, 250, 0.14);
+  color: rgba(150, 190, 255, 0.95);
 }
 
 .c-dur {

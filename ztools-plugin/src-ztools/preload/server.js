@@ -1,6 +1,6 @@
 'use strict'
 /**
- * server.js — LAN 歌词插件的 preload 适配层(ZTools 加载的入口)。
+ * server.js — 词投(LyricCast)插件的 preload 适配层(ZTools 加载的入口)。
  *
  * 核心 WebSocket 服务端在 ./lan-server-core.js(纯 Node,可独立测试);
  * 本文件把它接到 window.services 上,UI(dist 里的 Vue 应用)直接调用,
@@ -71,7 +71,7 @@ window.services = {
   localAddresses,
 
   /**
-   * LAN 歌词服务控制面。所有方法同步/Promise 混合,UI 侧按需 await。
+   * 词投(LyricCast)服务控制面。所有方法同步/Promise 混合,UI 侧按需 await。
    */
   lanLyrics: {
     /**
@@ -100,7 +100,7 @@ window.services = {
         await core.start()
       } catch (err) {
         const message = err && err.message ? err.message : String(err)
-        console.error('[lan-lyrics] start failed:', message)
+        console.error('[lyriccast] start failed:', message)
         core = null
         emit({ kind: 'server-error', message })
         return { ok: false, error: message }

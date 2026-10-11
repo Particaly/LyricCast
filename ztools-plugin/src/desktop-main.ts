@@ -17,15 +17,28 @@ import DesktopLyrics from './components/DesktopLyrics.vue'
 // 真实环境(主窗口推送)下首次真实推送会立即覆盖
 if (import.meta.env.DEV) {
   setTimeout(() => {
-    if (desktopState.status === 'noplayback' && !desktopState.line) {
+    if (desktopState.status === 'noplayback' && desktopState.lines.length === 0) {
       applyDesktopState({
         hovered: false,
-        style: { fontSize: 26, theme: 'auto', translation: true, locked: false, opacity: 90, width: 870, height: 138 },
+        style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138 },
         status: 'ok',
         track: { title: '夜色温柔 (Demo)', artist: '虚拟歌手' },
-        line: '路灯连成一条 温柔的延长线',
-        next: '把你我的影子 拉得很长很长',
-        translation: 'Streetlights string a tender, endless line',
+        lines: [
+          '路灯连成一条 温柔的延长线',
+          '把你我的影子 拉得很长很长',
+          '晚风替我们收藏 未说完的话',
+          '夜色温柔 得像你的目光',
+          '时间在耳边 轻轻地唱'
+        ],
+        translations: [
+          'Streetlights string a tender, endless line',
+          'Stretching our shadows long and slow',
+          'The night wind keeps the words we left unsaid',
+          'The night is tender, like your gaze',
+          'Time sings softly in our ears'
+        ],
+        activeIndex: 1,
+        linesVersion: 1,
         progress: { atMs: Date.now(), positionMs: 34_000, speed: 1, playing: true, durationMs: 96_000 }
       })
     }

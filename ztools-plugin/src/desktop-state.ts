@@ -16,6 +16,8 @@ export interface DesktopState {
   style: {
     fontSize: number
     theme: 'auto' | 'light' | 'dark'
+    /** 文本水平对齐:左对齐(旧版观感)/ 居中 */
+    align: 'left' | 'center'
     translation: boolean
     /** 锁定:禁止拖动、工具栏只留解锁按钮 */
     locked: boolean
@@ -28,9 +30,14 @@ export interface DesktopState {
   }
   status: DesktopStatus
   track: { title: string; artist: string } | null
-  line: string | null
-  next: string | null
-  translation: string | null
+  /** 整首歌词行文本快照(status==='ok' 时携带);悬浮窗据此自建滚动轨道 */
+  lines: string[]
+  /** 与 lines 平行的译文快照(未开启翻译为空数组,无译文的行为 '') */
+  translations: string[]
+  /** 当前行在 lines 中的下标(已应用手动偏移);-1 表示尚未唱到第一句 */
+  activeIndex: number
+  /** 歌词内容版本号:行快照被整体替换(切歌/重新匹配)时自增,用于区分轨道重建与行推进 */
+  linesVersion: number
   progress: {
     atMs: number
     positionMs: number
@@ -42,34 +49,40 @@ export interface DesktopState {
 
 export const desktopState = reactive<DesktopState>({
   hovered: false,
-  style: { fontSize: 26, theme: 'auto', translation: true, locked: false, opacity: 90, width: 870, height: 138 },
+  style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138 },
   status: 'noplayback',
   track: null,
-  line: null,
-  next: null,
-  translation: null,
+  lines: [],
+  translations: [],
+  activeIndex: -1,
+  linesVersion: 0,
   progress: null
 })
 
-/** 主窗口推送入口(由 desktop-main.ts 挂到 window.__applyDesktopState) */
+/** 主窗口推送入口(由 desktop-main.ts 挂到 window.__applyDesktopState)。
+ * 各字段带类型兜底:旧版主窗口/异常负载缺字段时退回「无歌词」安全态 */
 export function applyDesktopState(payload: DesktopPush): void {
   if (!payload || typeof payload !== 'object') return
   desktopState.hovered = !!payload.hovered
   if (payload.style) Object.assign(desktopState.style, payload.style)
   desktopState.status = payload.status ?? 'noplayback'
   desktopState.track = payload.track ?? null
-  desktopState.line = payload.line ?? null
-  desktopState.next = payload.next ?? null
-  desktopState.translation = payload.translation ?? null
+  desktopState.lines = Array.isArray(payload.lines) ? payload.lines : []
+  desktopState.translations = Array.isArray(payload.translations) ? payload.translations : []
+  desktopState.activeIndex =
+    typeof payload.activeIndex === 'number' && Number.isFinite(payload.activeIndex)
+      ? payload.activeIndex
+      : -1
+  desktopState.linesVersion = typeof payload.linesVersion === 'number' ? payload.linesVersion : 0
   desktopState.progress = payload.progress ?? null
 }
 
 /** 悬浮窗缩放方位:n/s/e/w 为四边,nw/ne/sw/se 为四角 */
 export type DesktopResizeDir = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se'
 
-/** 悬浮窗工具栏动作消息;delta 仅 font,value 仅 opacity,size/dir 仅 resize 使用 */
+/** 悬浮窗工具栏动作消息;delta 仅 font,value 仅 opacity,align 等开关类无参,size/dir 仅 resize 使用 */
 export interface DesktopActionMessage {
-  type: 'font' | 'theme' | 'close' | 'translation' | 'lock' | 'opacity' | 'resize'
+  type: 'font' | 'theme' | 'close' | 'translation' | 'align' | 'lock' | 'opacity' | 'resize'
   delta?: number
   value?: number
   /** resize:目标胶囊尺寸(px,窗口 = 胶囊 + 四周各 5px 留白) */

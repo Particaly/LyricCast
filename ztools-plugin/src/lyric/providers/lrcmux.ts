@@ -25,7 +25,7 @@ const MAX_VARIANTS = 2
 
 const HEADERS = {
   // lrcmux 官方建议:标识应用与联系方式,便于对方排查;不含隐私信息
-  'User-Agent': 'lan-lyrics-ztools-plugin/0.2 (github.com/saihgupr/android_relay)'
+  'User-Agent': 'lyriccast-ztools-plugin/0.2 (github.com/saihgupr/android_relay)'
 }
 
 /** 一行歌词(解析后的 lrcmux JSON lines 项) */

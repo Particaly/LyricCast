@@ -24,7 +24,7 @@ const SEARCH_LIMIT = 10
 
 const SEARCH_HEADERS = {
   Referer: 'https://www.kugou.com/',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) lan-lyrics-plugin/0.2'
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) lyriccast-plugin/0.2'
 }
 
 interface KugouSearchResponse {
@@ -41,7 +41,7 @@ interface KugouSong {
 }
 
 interface KrcSearchResponse {
-  candidates?: Array<{ id: number; accesskey: string }>
+  candidates?: Array<{ id: number | string; accesskey: string }>
 }
 
 interface KrcDownloadResponse {
@@ -57,11 +57,18 @@ export function parseSearchResponse(payload: KugouSearchResponse): KugouSong[] {
   return Array.isArray(info) ? info : []
 }
 
-/** 解析歌词检索响应 → 首个候选的 id/accesskey(无候选/结构异常返回 null) */
+/**
+ * 解析歌词检索响应 → 首个候选的 id/accesskey(无候选/结构异常返回 null)。
+ * 关键参数:payload 为 krcs /search 的 JSON;返回 { id, accessKey } 供 /download 拼接。
+ * 重要行为:id 兼容接口的两种历史形态——数字与数字字符串(如 "317197757",
+ *   2025 年起线上返回字符串);非数字 id 视为结构异常返回 null。
+ */
 export function parseKrcCandidates(payload: KrcSearchResponse): { id: string; accessKey: string } | null {
   const first = payload?.candidates?.[0]
-  if (!first || typeof first.id !== 'number' || typeof first.accesskey !== 'string') return null
-  return { id: String(first.id), accessKey: first.accesskey }
+  if (!first || typeof first.accesskey !== 'string') return null
+  const id = typeof first.id === 'number' ? String(first.id) : typeof first.id === 'string' ? first.id.trim() : ''
+  if (!/^\d+$/.test(id)) return null
+  return { id, accessKey: first.accesskey }
 }
 
 /** 解码歌词下载响应 → LRC 原文(空/异常返回 null;容忍 URL-safe 变体与空白) */

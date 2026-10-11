@@ -51,6 +51,12 @@ const KRC_SAMPLE = {
   ]
 }
 
+/** 录制自 2025 线上响应:id 为数字字符串(krcs.kugou.com/search 实际形态) */
+const KRC_SAMPLE_STR_ID = {
+  status: 200,
+  candidates: [{ id: '317197757', accesskey: 'AK_245edc' }]
+}
+
 /** '第一句\n第二句' 的 UTF-8 base64(录制自真实响应格式) */
 const LRC_B64 = '56ys5LiA5Y+lCuesrOS6jOWPpQ=='
 const DOWNLOAD_SAMPLE = { status: 200, fmt: 'lrc', content: LRC_B64 }
@@ -70,13 +76,17 @@ describe('parseSearchResponse', () => {
 })
 
 describe('parseKrcCandidates', () => {
-  it('取首个候选的 id/accesskey', () => {
+  it('取首个候选的 id/accesskey(数字形态)', () => {
     expect(parseKrcCandidates(KRC_SAMPLE)).toEqual({ id: '456789', accessKey: 'AK_abcdef123' })
   })
-  it('无候选/缺字段返回 null', () => {
+  it('id 为数字字符串(线上 2025 形态)同样可用', () => {
+    expect(parseKrcCandidates(KRC_SAMPLE_STR_ID)).toEqual({ id: '317197757', accessKey: 'AK_245edc' })
+  })
+  it('无候选/缺字段/非数字 id 返回 null', () => {
     expect(parseKrcCandidates({})).toBeNull()
     expect(parseKrcCandidates({ candidates: [] })).toBeNull()
     expect(parseKrcCandidates({ candidates: [{ id: 'bad' as never, accesskey: 'k' }] })).toBeNull()
+    expect(parseKrcCandidates({ candidates: [{ id: true as never, accesskey: 'k' }] })).toBeNull()
   })
 })
 

@@ -1,10 +1,10 @@
 {
   "$schema": "node_modules/@ztools-center/ztools-api-types/resource/ztools.schema.json",
-  "name": "lan-lyrics",
-  "title": "LAN 歌词",
-  "description": "手机正在播放 → 局域网推送 → 网易云风格滚动歌词 + 桌面悬浮歌词(基于 android_relay)",
-  "author": "J.S.Patrick",
-  "version": "0.3.2",
+  "name": "lyriccast",
+  "title": "歌词投屏",
+  "description": "将手机上正在播放的歌曲歌词投屏到电脑上",
+  "author": "皮皮虾我们走",
+  "version": "0.4.0",
   "main": "dist/index.html",
   "preload": "preload/server.js",
   "logo": "logo.png",
@@ -17,9 +17,9 @@
   "features": [
     {
       "code": "lyrics",
-      "explain": "实时歌词:手机在局域网推送正在播放的歌曲",
+      "explain": "实时歌词:手机在局域网投送正在播放的歌曲,PC 端同步展示",
       "icon": "logo.png",
-      "cmds": ["歌词", "lyrics"]
+      "cmds": ["词投", "歌词", "lyriccast", "lyrics"]
     }
   ]
 }

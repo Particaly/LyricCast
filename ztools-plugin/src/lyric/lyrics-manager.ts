@@ -160,7 +160,11 @@ export class LyricsManager {
       }
       const normalized = this.normalize(raw)
       if (!normalized) return null
-      this.cache.putPinned(query, normalized, { provider: candidate.source })
+      // candidateId 随固定条目持久化,供候选面板重开时高亮"当前选中"
+      this.cache.putPinned(query, normalized, {
+        provider: candidate.source,
+        ...(candidate.id ? { candidateId: candidate.id } : {})
+      })
       return normalized
     } catch (err) {
       if (controller.signal.aborted) return null
@@ -179,6 +183,18 @@ export class LyricsManager {
   isPinned(track: TrackForLyrics): boolean {
     const query = this.buildQuery(track)
     return !!query.title && this.cache.getPinned(query) !== null
+  }
+
+  /**
+   * 当前固定候选的标识(候选面板高亮"当前选中"用)。
+   * @returns { source, id };未固定/固定条目未记录候选 id(无 id 候选或旧版本固定)返回 null
+   */
+  pinnedCandidate(track: TrackForLyrics): { source: string; id: string } | null {
+    const query = this.buildQuery(track)
+    if (!query.title) return null
+    const meta = this.cache.getPinnedMeta(query)
+    if (!meta?.candidateId) return null
+    return { source: meta.provider, id: meta.candidateId }
   }
 
   /**

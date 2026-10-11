@@ -32,6 +32,8 @@ export interface CacheMeta {
   score?: number
   /** 用户手动固定(优先于自动匹配) */
   userPinned?: boolean
+  /** 固定时所选候选的 id(候选面板高亮"当前选中";自动命中/无 id 候选无此字段) */
+  candidateId?: string
 }
 
 interface CacheEntryBase {
@@ -84,6 +86,17 @@ export class LyricCache {
   /** 用户固定条目(仅 userPinned=true);无固定/时长差超窗返回 null */
   getPinned(query: LyricQuery): LyricResult | null {
     return this.get(query, { pinnedOnly: true })
+  }
+
+  /**
+   * 用户固定条目的来源元数据(候选面板高亮"当前选中"用)。
+   * @returns 含 provider/candidateId 的 meta;无固定/时长差超窗返回 null
+   */
+  getPinnedMeta(query: LyricQuery): CacheMeta | null {
+    const entry = this.read(cacheKey(query))
+    if (!entry || entry.type !== 'result' || entry.meta?.userPinned !== true) return null
+    if (!this.durationMatches(entry, query)) return null
+    return entry.meta
   }
 
   /**

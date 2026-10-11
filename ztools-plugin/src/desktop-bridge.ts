@@ -6,6 +6,8 @@
  * - bridge 自持 250ms 定时器驱动推送(主窗口隐藏时 rAF 会暂停,定时器不受影响),
  *   按"内容签名变化即推、无变化 2s 心跳"的节奏,
  *   通过 webContents.executeJavaScript 调用悬浮窗暴露的 window.__applyDesktopState;
+ *   ok 状态推送整首行文本 + 平行译文 + 当前行下标,悬浮窗据此自建统一行高的
+ *   滚动轨道(行间平滑滑动,与首页歌词同款手感),悬浮窗不感知时间轴;
  * - 悬浮窗顶部工具栏(字号/翻译/锁定/透明度/配色/关闭)与边缘/角落缩放区写入
  *   window.__drainDesktopMessages 队列,
  *   主窗口每 100ms 轮询一次消费(同批 resize 只应用最后一条),统一走 updateSettings
@@ -16,9 +18,16 @@
  * - 窗口位置每 3s 采样持久化,重开时恢复;拖动靠 -webkit-app-region,无 JS 参与。
  */
 import { displayAnchor, lyric, userOffset } from './store'
-import { DESKTOP_FONT_RANGE, settings, updateSettings, type DesktopTheme } from './settings'
+import {
+  DESKTOP_FONT_RANGE,
+  settings,
+  updateSettings,
+  type DesktopAlign,
+  type DesktopTheme
+} from './settings'
 import { renderProgress } from './progress'
 import { findActiveLine } from './lyric/parse-lrc'
+import type { LyricsLine } from './lyric/types'
 import type { ProtocolStateMessage } from './env.d'
 import type { DesktopActionMessage, DesktopResizeDir } from './desktop-state'
 
@@ -36,6 +45,8 @@ export interface DesktopPush {
   style: {
     fontSize: number
     theme: DesktopTheme
+    /** 文本水平对齐:左对齐(旧版观感)/ 居中 */
+    align: DesktopAlign
     translation: boolean
     locked: boolean
     /** 背景不透明度(%) */
@@ -47,11 +58,20 @@ export interface DesktopPush {
   }
   status: 'ok' | 'loading' | 'nolyrics' | 'noplayback' | 'offline'
   track: { title: string; artist: string } | null
-  /** 当前句(已应用手动偏移);status !== 'ok' 时为 null */
-  line: string | null
-  /** 下一句;开启翻译且有当前行翻译时悬浮窗优先展示翻译 */
-  next: string | null
-  translation: string | null
+  /**
+   * 整首歌词的行文本快照(仅 status === 'ok' 时携带,空文本行已替换为 ♪);
+   * 悬浮窗据此自建统一行高的滚动轨道,行间平滑滑动,不再整句突换
+   */
+  lines: string[]
+  /** 与 lines 平行的译文快照(未开启翻译时为空数组;无译文的行为 '') */
+  translations: string[]
+  /** 当前行在 lines 中的下标(已应用手动偏移);-1 表示尚未唱到第一句 */
+  activeIndex: number
+  /**
+   * 歌词内容版本号:lyric.lines 引用被整体替换(切歌/重新匹配/繁简切换)时自增。
+   * 悬浮窗据此区分「轨道内容重建」与「行推进」,前者直接落位不播放滚动动画
+   */
+  linesVersion: number
   /** 进度锚点:悬浮窗按 speed 本地插值,避免高频推送 */
   progress: {
     atMs: number
@@ -85,6 +105,10 @@ let lastSignature = ''
 let lastPushAt = 0
 let timers: number[] = []
 let cursorInside = false
+/** 歌词行版本号:lyric.lines 引用被整体替换(切歌/重新匹配/繁简切换)时自增,
+ * 随推送下发给悬浮窗用于识别轨道内容重建;只在 ok 分支比对与推进 */
+let lastLinesRef: LyricsLine[] | null = null
+let linesVersion = 0
 
 function readPosition(): { x: number; y: number } | null {
   try {
@@ -304,17 +328,18 @@ export function syncDesktopLyrics(
   push(payload)
 }
 
-/** 内容签名:任一展示相关字段变化即触发立即推送 */
+/** 内容签名:任一展示相关字段变化即触发立即推送。
+ * 行推进靠 activeIndex 感知;歌词内容重建靠 linesVersion 感知 */
 function signatureOf(payload: DesktopPush): string {
   return [
     payload.hovered,
     payload.status,
     payload.track?.title ?? '',
-    payload.line ?? '',
-    payload.next ?? '',
-    payload.translation ?? '',
+    payload.activeIndex,
+    payload.linesVersion,
     payload.style.fontSize,
     payload.style.theme,
+    payload.style.align,
     payload.style.translation,
     payload.style.locked,
     payload.style.opacity,
@@ -335,12 +360,14 @@ function push(payload: DesktopPush): void {
   } catch (_) { /* 同上 */ }
 }
 
-/** 组装一次推送;数据全部来自 store/settings,保证与主界面同一套状态源 */
+/** 组装一次推送;数据全部来自 store/settings,保证与主界面同一套状态源。
+ * ok 状态携带整首行文本 + 平行译文 + 当前行下标,悬浮窗据此自建滚动轨道 */
 function buildPush(rendered: { positionMs: number; known: boolean; status: string }): DesktopPush {
   const hovered = cursorInside
   const style = {
     fontSize: settings.desktopFontSize,
     theme: settings.desktopTheme,
+    align: settings.desktopAlign,
     translation: settings.desktopTranslation,
     locked: settings.desktopLocked,
     opacity: settings.desktopOpacity,
@@ -349,12 +376,18 @@ function buildPush(rendered: { positionMs: number; known: boolean; status: strin
   }
   const anchor = displayAnchor.value
   if (!anchor) {
-    return { hovered, style, status: 'noplayback', track: null, line: null, next: null, translation: null, progress: null }
+    return {
+      hovered, style, status: 'noplayback', track: null,
+      lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
+    }
   }
   const state = anchor.state
   const track = { title: state.track.title || '', artist: state.track.artist || '' }
   if (rendered.status === 'disconnected') {
-    return { hovered, style, status: 'offline', track, line: null, next: null, translation: null, progress: null }
+    return {
+      hovered, style, status: 'offline', track,
+      lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
+    }
   }
   const positionKnown = rendered.known && rendered.positionMs >= 0
   const searchPosition = positionKnown ? rendered.positionMs + userOffset.value : Number.NaN
@@ -363,24 +396,36 @@ function buildPush(rendered: { positionMs: number; known: boolean; status: strin
       ? findActiveLine(lyric.lines, searchPosition)
       : -1
   if (lyric.loading) {
-    return { hovered, style, status: 'loading', track, line: null, next: null, translation: null, progress: null }
+    return {
+      hovered, style, status: 'loading', track,
+      lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
+    }
   }
   if (activeIndex < 0 && lyric.lines.length === 0) {
-    return { hovered, style, status: 'nolyrics', track, line: null, next: null, translation: null, progress: null }
+    return {
+      hovered, style, status: 'nolyrics', track,
+      lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
+    }
   }
-  const active = activeIndex >= 0 ? lyric.lines[activeIndex] ?? null : null
-  const next = activeIndex >= 0 ? lyric.lines[activeIndex + 1] ?? null : null
-  const translation =
-    settings.desktopTranslation && active ? lyric.translationMap.get(active.timeMs) ?? null : null
+  // 行快照:引用被整体替换(切歌/重新匹配/繁简切换)才推进版本号,行推进不触发
+  if (lyric.lines !== lastLinesRef) {
+    lastLinesRef = lyric.lines
+    linesVersion++
+  }
+  const lines = lyric.lines.map((line) => line.text || '♪')
+  const translations = settings.desktopTranslation
+    ? lyric.lines.map((line) => lyric.translationMap.get(line.timeMs) ?? '')
+    : []
   const playbackState: ProtocolStateMessage['playback'] = state.playback
   return {
     hovered,
     style,
     status: 'ok',
     track,
-    line: active ? active.text || '♪' : null,
-    next: next?.text || null,
-    translation,
+    lines,
+    translations,
+    activeIndex,
+    linesVersion,
     progress: positionKnown
       ? {
           atMs: Date.now(),
@@ -440,7 +485,7 @@ function stopTimers(): void {
   timers = []
 }
 
-/** 消费悬浮窗工具栏消息(字号/翻译/锁定/透明度/尺寸/配色/关闭),统一落回 settings。
+/** 消费悬浮窗工具栏消息(字号/翻译/对齐/锁定/透明度/尺寸/配色/关闭),统一落回 settings。
  * 同一批里可能堆了多条 resize(子窗口 ~33ms 节流入队,本函数 100ms 轮询一次):
  * 中间尺寸没有意义,只应用最后一条,避免 settings 连写和窗口连续缩放 */
 async function drainMessages(): Promise<void> {
@@ -467,6 +512,8 @@ async function drainMessages(): Promise<void> {
         updateSettings({ desktopTheme: next ?? 'auto' })
       } else if (message?.type === 'translation') {
         updateSettings({ desktopTranslation: !settings.desktopTranslation })
+      } else if (message?.type === 'align') {
+        updateSettings({ desktopAlign: settings.desktopAlign === 'center' ? 'left' : 'center' })
       } else if (message?.type === 'lock') {
         updateSettings({ desktopLocked: !settings.desktopLocked })
       } else if (message?.type === 'opacity') {

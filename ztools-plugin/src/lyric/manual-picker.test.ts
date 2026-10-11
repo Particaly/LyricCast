@@ -2,6 +2,7 @@
  * 手动纠错测试(任务 3.1):
  * - fetchCandidates:聚合支持 searchCandidates 的来源,单源失败静默,禁用源不出现;
  * - pinLyrics:自带内容的候选直接固定;仅带 id 的候选按源回取;固定后自动路径直读;
+ * - pinnedCandidate:固定候选的 source+id 持久化读回(候选面板高亮"当前选中"),unpin 清空;
  * - unpinLyrics 恢复自动匹配。
  */
 import { describe, expect, it } from 'vitest'
@@ -113,5 +114,27 @@ describe('pinLyrics', () => {
     const fetched = await mgr.fetchForTrack(TRACK, '')
     expect(calls).toBe(0)
     expect(fetched?.synced).toBe(SYNCED)
+  })
+})
+
+describe('pinnedCandidate(候选面板标注当前选中)', () => {
+  it('固定带 id 的候选:source+id 随缓存持久化读回,unpin 后清空', async () => {
+    const storage = createMemoryStorage()
+    const src = provider('netease', {
+      fetchLyricsById: async () => ({ synced: SYNCED, plain: null, source: 'netease' })
+    })
+    const mgr = new LyricsManager({ storage, providers: [src] })
+    expect(mgr.pinnedCandidate(TRACK)).toBeNull()
+    await mgr.pinLyrics(TRACK, { title: '晴天', artist: '周杰伦', source: 'netease', id: '186016' })
+    expect(mgr.pinnedCandidate(TRACK)).toEqual({ source: 'netease', id: '186016' })
+    await mgr.unpinLyrics(TRACK)
+    expect(mgr.pinnedCandidate(TRACK)).toBeNull()
+  })
+
+  it('固定无 id 候选(自带内容):无从按 id 标注,返回 null', async () => {
+    const mgr = new LyricsManager({ storage: createMemoryStorage(), providers: [provider('lrclib')] })
+    await mgr.pinLyrics(TRACK, { title: '晴天', artist: '周杰伦', source: 'lrclib', synced: SYNCED })
+    expect(mgr.isPinned(TRACK)).toBe(true)
+    expect(mgr.pinnedCandidate(TRACK)).toBeNull()
   })
 })

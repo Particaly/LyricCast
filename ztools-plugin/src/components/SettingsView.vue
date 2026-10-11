@@ -201,6 +201,26 @@ function regenerateToken() {
         </div>
         <div class="setting-row">
           <div class="setting-label">
+            <div class="setting-title">对齐方式</div>
+            <div class="setting-hint">歌词文本水平对齐;也可在悬浮窗工具栏点「左/中」切换</div>
+          </div>
+          <div class="segment">
+            <button
+              :class="{ on: settings.desktopAlign === 'left' }"
+              @click="updateSettings({ desktopAlign: 'left' })"
+            >
+              左对齐
+            </button>
+            <button
+              :class="{ on: settings.desktopAlign === 'center' }"
+              @click="updateSettings({ desktopAlign: 'center' })"
+            >
+              居中
+            </button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
             <div class="setting-title">背景不透明度</div>
             <div class="setting-hint">悬浮窗背景浓淡,0 为全透明(仅显示文字与进度)</div>
           </div>
@@ -264,6 +284,20 @@ function regenerateToken() {
             type="checkbox"
             :checked="settings.translation"
             @change="updateSettings({ translation: ($event.target as HTMLInputElement).checked })"
+          />
+          <span class="track"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">
+          <div class="setting-title">繁体转简体</div>
+          <div class="setting-hint">歌词判定为繁体时,经内置字表(OpenCC)逐字转为简体显示;日语歌词不转换</div>
+        </div>
+        <label class="switch">
+          <input
+            type="checkbox"
+            :checked="settings.traditionalToSimplified"
+            @change="updateSettings({ traditionalToSimplified: ($event.target as HTMLInputElement).checked })"
           />
           <span class="track"></span>
         </label>
@@ -357,6 +391,23 @@ function regenerateToken() {
               type="checkbox"
               :checked="settings.parallelProviders"
               @change="updateSettings({ parallelProviders: ($event.target as HTMLInputElement).checked })"
+            />
+            <span class="track"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">封面 API 兜底</div>
+            <div class="setting-hint">
+              手机未推送封面时,按曲名/歌手/专辑从 LrcAPI、MusicBrainz 封面艺术档案拉取;
+              播放器带内嵌封面时不受影响
+            </div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.coverFromApi"
+              @change="updateSettings({ coverFromApi: ($event.target as HTMLInputElement).checked })"
             />
             <span class="track"></span>
           </label>
@@ -456,7 +507,7 @@ function regenerateToken() {
     <section class="card">
       <h2>关于</h2>
       <div class="muted small about-line">
-        LAN 歌词 v0.3.0 · 手机 <b>android_relay</b> 推送播放状态,PC 侧匹配并滚动展示歌词<br />
+        词投 LyricCast v0.4.0 · 手机 <b>android_relay</b> 推送播放状态,PC 侧匹配并滚动展示歌词<br />
         歌词来源:LRCLIB(主源)+ 网易云(中文回退,非官方接口);优先使用带时间轴的逐行歌词,
         匹配不到时降级为纯文本
       </div>

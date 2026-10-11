@@ -1,6 +1,6 @@
 'use strict'
 /**
- * lan-server-core.js — LAN 歌词插件的 WebSocket 服务端核心(docs/protocol.md v1.1)。
+ * lan-server-core.js — 词投(LyricCast)插件的 WebSocket 服务端核心(docs/protocol.md v1.1)。
  *
  * 纯 Node 模块,不依赖 window / Electron,可在普通 Node 进程中单元测试;
  * preload/server.js 是它接入 ZTools 的薄适配层。

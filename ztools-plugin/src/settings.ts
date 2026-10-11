@@ -9,6 +9,9 @@ import { createMemoryStorage, type KVStorage } from './lyric/cache'
 
 export type DesktopTheme = 'auto' | 'light' | 'dark'
 
+/** 桌面歌词文本水平对齐方式:left 还原旧版观感,center 与首页歌词一致 */
+export type DesktopAlign = 'left' | 'center'
+
 export interface Settings {
   /** 桌面悬浮歌词开关(独立置顶透明窗口) */
   desktopEnabled: boolean
@@ -16,6 +19,8 @@ export interface Settings {
   desktopFontSize: number
   /** 桌面歌词配色:跟随系统 / 浅底深字 / 深底浅字 */
   desktopTheme: DesktopTheme
+  /** 桌面歌词文本水平对齐:左对齐(默认,旧版观感)/ 居中 */
+  desktopAlign: DesktopAlign
   /** 桌面歌词是否在当前行下方显示翻译(无翻译时显示下一句) */
   desktopTranslation: boolean
   /** 桌面歌词是否锁定:禁止拖动、隐藏悬浮工具栏(仅留解锁按钮),防误触 */
@@ -38,10 +43,14 @@ export interface Settings {
   providerBetterLyrics: boolean
   /** 并行请求各来源(时间预算模式);关闭退化为按路由顺序串行 */
   parallelProviders: boolean
+  /** 封面 API 兜底:手机未推送封面时,按曲目元数据从 LrcAPI/MusicBrainz 拉取封面 */
+  coverFromApi: boolean
   /** 主界面滚动歌词字号(px) */
   mainFontSize: number
   /** 主界面歌词是否显示翻译 */
   translation: boolean
+  /** 繁体转简体:歌词判定为繁体时,经内置字表(OpenCC)逐字转换为简体显示 */
+  traditionalToSimplified: boolean
 }
 
 export const SETTINGS_KEY = 'lanlyrics.settings.v1'
@@ -60,16 +69,19 @@ const DEFAULTS: Settings = {
   providerLrcmux: true,
   providerBetterLyrics: true,
   parallelProviders: true,
+  coverFromApi: true,
   desktopEnabled: false,
   desktopFontSize: 26,
   desktopTheme: 'auto',
+  desktopAlign: 'left',
   desktopTranslation: true,
   desktopLocked: false,
   desktopOpacity: 90,
   desktopWidth: 870,
   desktopHeight: 138,
   mainFontSize: 16,
-  translation: true
+  translation: true,
+  traditionalToSimplified: false
 }
 
 function storage(): KVStorage {
@@ -95,19 +107,28 @@ function sanitize(raw: unknown): Settings {
       typeof input.providerBetterLyrics === 'boolean' ? input.providerBetterLyrics : DEFAULTS.providerBetterLyrics,
     parallelProviders:
       typeof input.parallelProviders === 'boolean' ? input.parallelProviders : DEFAULTS.parallelProviders,
+    coverFromApi: typeof input.coverFromApi === 'boolean' ? input.coverFromApi : DEFAULTS.coverFromApi,
     desktopEnabled: typeof input.desktopEnabled === 'boolean' ? input.desktopEnabled : DEFAULTS.desktopEnabled,
     desktopFontSize: clamp(input.desktopFontSize, DESKTOP_FONT_RANGE.min, DESKTOP_FONT_RANGE.max, DEFAULTS.desktopFontSize),
     desktopTheme:
       input.desktopTheme === 'light' || input.desktopTheme === 'dark' || input.desktopTheme === 'auto'
         ? input.desktopTheme
         : DEFAULTS.desktopTheme,
+    desktopAlign:
+      input.desktopAlign === 'left' || input.desktopAlign === 'center'
+        ? input.desktopAlign
+        : DEFAULTS.desktopAlign,
     desktopTranslation: typeof input.desktopTranslation === 'boolean' ? input.desktopTranslation : DEFAULTS.desktopTranslation,
     desktopLocked: typeof input.desktopLocked === 'boolean' ? input.desktopLocked : DEFAULTS.desktopLocked,
     desktopOpacity: clamp(input.desktopOpacity, DESKTOP_OPACITY_RANGE.min, DESKTOP_OPACITY_RANGE.max, DEFAULTS.desktopOpacity),
     desktopWidth: clamp(input.desktopWidth, DESKTOP_SIZE_RANGE.minWidth, DESKTOP_SIZE_RANGE.maxWidth, DEFAULTS.desktopWidth),
     desktopHeight: clamp(input.desktopHeight, DESKTOP_SIZE_RANGE.minHeight, DESKTOP_SIZE_RANGE.maxHeight, DEFAULTS.desktopHeight),
     mainFontSize: clamp(input.mainFontSize, MAIN_FONT_RANGE.min, MAIN_FONT_RANGE.max, DEFAULTS.mainFontSize),
-    translation: typeof input.translation === 'boolean' ? input.translation : DEFAULTS.translation
+    translation: typeof input.translation === 'boolean' ? input.translation : DEFAULTS.translation,
+    traditionalToSimplified:
+      typeof input.traditionalToSimplified === 'boolean'
+        ? input.traditionalToSimplified
+        : DEFAULTS.traditionalToSimplified
   }
 }
 

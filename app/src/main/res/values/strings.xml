@@ -4,7 +4,7 @@
   布局与代码只允许引用 @string / getString(),不得再硬编码。
 -->
 <resources>
-    <string name="app_name">Android Relay</string>
+    <string name="app_name">词投</string>
     <string name="notification_stop">停止</string>
 
     <!-- 顶栏 -->
@@ -20,7 +20,7 @@
 
     <!-- 权限引导卡(仅通知监听未授权时显示) -->
     <string name="guide_listener_title">通知使用权限未授权</string>
-    <string name="guide_listener_body">需要允许 Android Relay 读取通知,才能获取“正在播放”的音乐信息</string>
+    <string name="guide_listener_body">需要允许词投读取通知,才能获取“正在播放”的音乐信息</string>
     <string name="guide_listener_action">去授权</string>
     <string name="guide_listener_adb_toggle">无法跳转?用 ADB 授权</string>
     <string name="guide_listener_adb_cmd">adb shell cmd notification allow_listener com.saihgupr.androidrelay/.MediaSessionListenerService</string>
@@ -68,7 +68,7 @@
     <string name="fg_start_failed">后台保活服务启动失败:%1$s</string>
     <string name="notify_permission_denied">未授予通知权限:后台服务仍会运行,但状态栏不显示</string>
     <string name="battery_dialog_title">保持后台连接</string>
-    <string name="battery_dialog_message">息屏后系统可能冻结应用、断开推送。\n\n建议把 Android Relay 的电池策略改为「无限制」或「忽略电池优化」,让播放信息在息屏时持续同步到 PC。</string>
+    <string name="battery_dialog_message">息屏后系统可能冻结应用、断开推送。\n\n建议把词投的电池策略改为「无限制」或「忽略电池优化」,让播放信息在息屏时持续同步到 PC。</string>
     <string name="battery_dialog_go">去授权</string>
     <string name="battery_dialog_later">稍后再说</string>
     <string name="battery_dialog_manual_fallback">请手动到系统设置中关闭电池优化</string>
@@ -90,27 +90,27 @@
     <string name="ka_action_never">不再提示</string>
 
     <string name="ka_battery_title">电池优化白名单</string>
-    <string name="ka_battery_desc">在 设置 → 应用管理 → Android Relay → 电池/省电策略 中改为「无限制」或「忽略电池优化」,避免息屏后被系统冻结、断开推送。</string>
+    <string name="ka_battery_desc">在 设置 → 应用管理 → 词投 → 电池/省电策略 中改为「无限制」或「忽略电池优化」,避免息屏后被系统冻结、断开推送。</string>
 
     <string name="ka_autostart_title">自启动 / 后台活动</string>
     <string name="ka_autostart_confirm">我已完成上述设置</string>
-    <string name="ka_autostart_desc_miui">MIUI / 澎湃OS:① 设置 → 应用管理 → Android Relay,打开「自启动」;② 省电策略改为「无限制」;③ 允许「后台弹出界面」。</string>
-    <string name="ka_autostart_desc_huawei">EMUI / 鸿蒙:设置 → 应用 → 应用启动管理 → Android Relay,关闭「自动管理」,在手动管理中打开「允许自启动」「允许关联启动」「允许后台活动」。</string>
-    <string name="ka_autostart_desc_oppo">ColorOS:设置 → 应用 → Android Relay → 电池,允许「完全后台行为」;并在「自启动管理」中允许自启动与关联启动。同页如有「应用速冻」开关请一并关闭——速冻会在切后台/锁屏后冻结进程导致连接中断。</string>
-    <string name="ka_autostart_desc_vivo">OriginOS / Funtouch:i管家 → 权限管理 → 自启动,允许 Android Relay 自启动;并在「后台耗电」中允许后台高耗电。</string>
-    <string name="ka_autostart_desc_samsung">One UI:设置 → 电池 → 后台使用限制,把 Android Relay 移出「睡眠」/「深度睡眠」应用列表。</string>
-    <string name="ka_autostart_desc_meizu">Flyme:手机管家 → 权限管理 → 自启动管理,允许 Android Relay 自启动并保持后台运行。</string>
+    <string name="ka_autostart_desc_miui">MIUI / 澎湃OS:① 设置 → 应用管理 → 词投,打开「自启动」;② 省电策略改为「无限制」;③ 允许「后台弹出界面」。</string>
+    <string name="ka_autostart_desc_huawei">EMUI / 鸿蒙:设置 → 应用 → 应用启动管理 → 词投,关闭「自动管理」,在手动管理中打开「允许自启动」「允许关联启动」「允许后台活动」。</string>
+    <string name="ka_autostart_desc_oppo">ColorOS:设置 → 应用 → 词投 → 电池,允许「完全后台行为」;并在「自启动管理」中允许自启动与关联启动。同页如有「应用速冻」开关请一并关闭——速冻会在切后台/锁屏后冻结进程导致连接中断。</string>
+    <string name="ka_autostart_desc_vivo">OriginOS / Funtouch:i管家 → 权限管理 → 自启动,允许词投自启动;并在「后台耗电」中允许后台高耗电。</string>
+    <string name="ka_autostart_desc_samsung">One UI:设置 → 电池 → 后台使用限制,把词投移出「睡眠」/「深度睡眠」应用列表。</string>
+    <string name="ka_autostart_desc_meizu">Flyme:手机管家 → 权限管理 → 自启动管理,允许词投自启动并保持后台运行。</string>
     <string name="ka_autostart_desc_stock">原生 Android 无需自启动白名单;如「电池」设置中提供「无限制」选项,选择即可。</string>
-    <string name="ka_autostart_no_entry">未能打开自启动设置页,请手动进入 设置 → 应用管理 → Android Relay</string>
+    <string name="ka_autostart_no_entry">未能打开自启动设置页,请手动进入 设置 → 应用管理 → 词投</string>
 
     <string name="ka_lock_title">多任务加锁</string>
     <string name="ka_lock_confirm">我已在多任务中加锁</string>
-    <string name="ka_lock_desc_miui">打开「多任务」界面,找到 Android Relay 卡片,长按后点「锁定」(🔒),一键清理时不会被杀。</string>
-    <string name="ka_lock_desc_huawei">打开「多任务」界面,找到 Android Relay 卡片,下滑卡片后点 🔒 锁定后台。</string>
-    <string name="ka_lock_desc_oppo">打开「多任务」界面,长按 Android Relay 卡片,选择「锁定」。</string>
-    <string name="ka_lock_desc_vivo">打开「多任务」界面,长按 Android Relay 卡片,点 🔒(或加入白名单)。</string>
-    <string name="ka_lock_desc_samsung">打开「多任务」界面,点 Android Relay 卡片上的应用图标,选择「锁定此应用」。</string>
-    <string name="ka_lock_desc_meizu">打开「多任务」界面,下滑 Android Relay 卡片,点 🔒 锁定。</string>
+    <string name="ka_lock_desc_miui">打开「多任务」界面,找到词投卡片,长按后点「锁定」(🔒),一键清理时不会被杀。</string>
+    <string name="ka_lock_desc_huawei">打开「多任务」界面,找到词投卡片,下滑卡片后点 🔒 锁定后台。</string>
+    <string name="ka_lock_desc_oppo">打开「多任务」界面,长按词投卡片,选择「锁定」。</string>
+    <string name="ka_lock_desc_vivo">打开「多任务」界面,长按词投卡片,点 🔒(或加入白名单)。</string>
+    <string name="ka_lock_desc_samsung">打开「多任务」界面,点词投卡片上的应用图标,选择「锁定此应用」。</string>
+    <string name="ka_lock_desc_meizu">打开「多任务」界面,下滑词投卡片,点 🔒 锁定。</string>
     <string name="ka_lock_desc_stock">本系统无需多任务加锁,可忽略此项。</string>
 
     <string name="ka_notification_title">常驻通知栏</string>

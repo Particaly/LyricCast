@@ -96,7 +96,7 @@ async function searchRecords(query: LyricQuery, signal: AbortSignal): Promise<Lr
 
   const headers = {
     // LRCLIB 建议标注来源,方便对方联系;不含任何隐私信息
-    'User-Agent': 'lan-lyrics-ztools-plugin/0.2'
+    'User-Agent': 'lyriccast-ztools-plugin/0.2'
   }
   let requests = 0
   const collected: LrcLibRecord[] = []

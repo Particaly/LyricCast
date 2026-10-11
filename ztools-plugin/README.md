@@ -1,7 +1,7 @@
-# LAN 歌词(ZTools 插件)
+# 词投 LyricCast(ZTools 插件)
 
 > 手机正在播放 → 局域网推送 → ZTools 插件实时滚动歌词 + 桌面悬浮歌词。
-> 配套 Android 端:[android_relay(LAN 歌词版)](../README.md)。
+> 配套 Android 端:[android_relay(词投 LyricCast 版)](../README.md)。
 
 由 `@ztools-center/plugin-cli`(`ztools create`,Vue3 + TypeScript + Vite 模板)生成骨架后二次开发。
 
@@ -12,10 +12,17 @@
   平滑跟随播放进度,翻译内嵌当前行下方;未配对时是旋转唱片空态引导;
 - **「设置」页**:桌面歌词 / 歌词显示 / 歌词校准 / 连接 / 关于四个分区;
 - **桌面悬浮歌词**:独立置顶透明窗口(网易云桌面歌词同思路)—— 常驻屏幕可拖动,
-  当前句大字 + 翻译/下一句小字 + 底部细进度条;悬停出控制条(A± 字号、配色切换、关闭),
-  字号/配色/翻译在设置页可调,窗口位置自动记忆;
+  歌词按统一行高轨道平滑滚动(与首页同款手感),保持 2 行视图:当前句大字 +
+  翻译/下一句小字,行推进平滑上滑;对齐方式可调(左对齐/居中,默认左对齐),
+  底部细进度条;悬停出控制条(A± 字号、翻译、对齐、配色、关闭),
+  字号/配色/翻译/对齐在设置页可调,窗口位置自动记忆;
 - **歌词匹配**:LRCLIB 主源 + 网易云回退源,跨来源**优先取带有效时间轴(Synced)的歌词**,
   伪时间轴空壳自动降级纯文本;缓存 + 24h 负缓存;
+- **封面 API 兜底**(可选开关):手机未推送封面时,按曲名/歌手/专辑依次从 LrcAPI
+  (`api.lrc.cx/cover`)、MusicBrainz + Cover Art Archive 拉取封面 URL;
+  切歌后等 3s 宽限期防与手机推送重复,结果持久缓存 30 天(负缓存 24h);
+- **繁体转简体**(可选开关):歌词判定为繁体时,经内置 OpenCC 字表(约 3000 对)**逐字直转**
+  为简体显示,主歌词/翻译/纯文本全覆盖,日语歌词(含假名)自动跳过;
 - **配对二维码**:设置 → 连接卡展示,含全部局域网 IP + 端口 + Token,
   手机 App「Scan QR to Connect」扫码即完成配对(docs/protocol.md §7);
 - **多设备**:单活跃设备,多台手机时可在设置页切换;手动校准 ±100/±500ms
@@ -31,7 +38,7 @@ npm run build
 # 2. 安装 preload 服务端依赖(ws,必须;随插件分发)
 cd src-ztools/preload && npm install && cd ../..
 
-# 3. 单元测试(73 个:LRC 解析/清洗/匹配/缓存/偏移/服务端插值/synced 优先策略)
+# 3. 单元测试(LRC 解析/清洗/匹配/缓存/偏移/服务端插值/synced 优先策略/简繁转换/封面兜底)
 npm test
 ```
 
@@ -83,6 +90,9 @@ ztools-plugin/
 │   └── lyric/
 │       ├── providers/           # lrclib.ts(主源) netease.ts(中文回退,非官方)
 │       ├── lyrics-manager.ts    # 编排:缓存 → synced 优先两轮回退 → 写缓存
+│       ├── cover.ts             # 封面 API 兜底(LrcAPI + MusicBrainz/CAA,Image 探测 + 缓存)
+│       ├── t2s.ts               # 繁→简显示转换(整段繁体判定 + 字表直转)
+│       ├── t2s-table.ts         # 繁→简单字映射表(提取自 OpenCC TSCharacters)
 │       ├── parse-lrc.ts         # LRC 解析(多时间戳/offset/增强标签/伪时间轴判定)
 │       ├── clean-title.ts       # 标题/歌手清洗
 │       ├── match.ts             # 候选挑选(Dice 相似度 + 时长权重)
@@ -103,14 +113,16 @@ ztools-plugin/
 - **独立窗口**:`ztools.createBrowserWindow('dist/desktop.html', { transparent, alwaysOnTop,
   frame: false, focusable: false, skipTaskbar: true, ... })`,不加载 preload、不跑 WebSocket,
   是纯哑渲染器;固定加载 dist 产物,开发时靠 watch build 刷新;
-- **状态推送**:主窗口 rAF tick 里计算当前句/进度锚点,经 `webContents.executeJavaScript`
-  调用悬浮窗的 `window.__applyDesktopState`;内容签名变化立即推,否则 2s 心跳;
-  悬浮窗按 speed 本地插值进度条,不依赖推送频率;
+- **状态推送**:主窗口 rAF tick 里计算当前句下标/进度锚点,经 `webContents.executeJavaScript`
+  调用悬浮窗的 `window.__applyDesktopState`;ok 状态推送整首行文本 + 平行译文 +
+  当前行下标 + linesVersion(歌词整体重建时自增),内容签名变化立即推,否则 2s 心跳;
+  悬浮窗据此自建统一行高的滚动轨道,行推进平滑上滑;进度条按 speed 本地插值,不依赖推送频率;
 - **按钮回传**:悬浮窗无向主窗口的推送通道,控制条动作写入 `window.__drainDesktopMessages`
   队列,主窗口每 800ms 轮询消费,统一落回 `settings` 持久化(关闭即联动销毁窗口);
 - **拖动**:整个胶囊 `-webkit-app-region: drag`(控制条 no-drag),无 JS 参与;
   位置每 3s 采样持久化,重开时校验仍落在某块屏幕内才恢复,否则回默认位;
-- **生命周期**:插件视图隐藏(后台运行)不影响悬浮窗;`onPluginOut` 时销毁。
+- **生命周期**:`onPluginOut` 在「转入后台」和「完全退出」时都会触发(processExit 区分),
+  转后台时悬浮窗常驻(bridge 自持定时器,不依赖主窗口),仅完全退出时销毁。
 
 ## 工作机制要点
 
@@ -122,7 +134,9 @@ ztools-plugin/
 - **npm 依赖**:preload 遵循 CommonJS,`ws` 安装在 `preload/` 目录内随插件分发;
   按 ZTools 发布要求 preload 源码保持可读(不打包/不混淆);
 - **歌词获取在 PC 侧**:Node 无 CORS 限制;查询键 `规范标题|规范歌手|时长(秒)`,
-  未命中结果负缓存 24h;单源 5 秒超时,切歌取消在途请求。
+  未命中结果负缓存 24h;单源 5 秒超时,切歌取消在途请求;
+- **繁→简为展示层转换**:缓存里始终存来源原文,开关切换仅按原始结果同步重绘
+  (不重新请求来源);判定以整段"繁体特征字占比"为准,含假名视为日文一律跳过。
 
 ## 打包
 
@@ -132,6 +146,9 @@ ztools-plugin/
 ## 已知限制
 
 - 网易云 provider 为非官方接口,可能失效(失败自动回退 LRCLIB,不影响主流程);
+- 封面兜底的 LrcAPI 为公益接口(可能限流/变动),MusicBrainz 有速率约束;
+  两处都拉不到封面时保持占位符,点击可重试;
+- 繁→简为字表直转,不做词汇级地域用语转换(如「滑鼠/鼠标」),个别表外生僻字保留原形;
 - 桌面歌词悬浮窗为不透明胶囊(圆角外区域不响应鼠标穿透),后续可按需加"鼠标穿透锁定";
 - 悬浮窗在 `createBrowserWindow` 不可用的环境(如 ZTools 版本过旧)无法开启,设置页会提示错误;
 - ZTools 重启后,未开「跟随主程序同时启动运行」时需要手动进入一次插件;

@@ -1,7 +1,7 @@
 {
-  "name": "ztools-plugin",
-  "version": "1.0.0",
-  "description": "手机正在播放 → 局域网推送 → 实时滚动歌词(基于 android_relay)",
+  "name": "lyriccast-ztools-plugin",
+  "version": "0.4.0",
+  "description": "将手机上正在播放的歌曲歌词投屏到电脑上",
   "type": "module",
   "scripts": {
     "dev": "vite",
