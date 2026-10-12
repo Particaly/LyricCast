@@ -25,3 +25,5 @@ captures/
 
 # Node / tools
 node_modules/
+# 本地签名 keystore(勿提交,记得另行备份)
+signing/
