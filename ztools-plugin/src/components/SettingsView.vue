@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 设置页:桌面歌词 / 歌词显示与校准 / 连接(设备、配对二维码、端口 Token)/ 关于。
+ * 设置页:桌面歌词 / 歌词显示与校准 / 连接(设备、配对二维码、端口 Token)/ 手机端下载 / 关于。
  * 所有可调项走 settings.updateSettings 持久化;连接配置仍由 preload 的 lanLyrics 服务管理。
  */
 import { computed, ref } from 'vue'
@@ -16,6 +16,7 @@ import {
 } from '../settings'
 import { resetDesktopPosition } from '../desktop-bridge'
 import { buildPairingPayload } from '../qr/pair-qr'
+import { APK_DOWNLOAD_URL, buildDownloadQrSvg } from '../qr/download-qr'
 
 // ===== 桌面歌词 =====
 const THEME_OPTIONS: Array<{ value: DesktopTheme; label: string }> = [
@@ -106,6 +107,22 @@ const qrSvg = computed(() => {
     return ''
   }
 })
+
+// ===== 手机端下载二维码(指向 GitHub Releases 最新 APK,由 android-release.yml 发版)=====
+const showDownloadQr = ref(false)
+
+/** 下载地址二维码 SVG;展开时才计算,生成异常时为空串 */
+const downloadQrSvg = computed(() => (showDownloadQr.value ? buildDownloadQrSvg() : ''))
+
+/** 复制下载链接,扫码不便时可在手机浏览器直接打开 */
+function copyDownloadUrl() {
+  const textarea = document.createElement('textarea')
+  textarea.value = APK_DOWNLOAD_URL
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
 
 // ===== 端口 / Token =====
 const editingPort = ref('')
@@ -500,6 +517,22 @@ function regenerateToken() {
       </template>
       <div class="muted hint">
         无摄像头/扫码不便时,也可在手机 App「Android Relay → LAN Push」中手动填入地址与 Token
+      </div>
+    </section>
+
+    <!-- ===== 手机端 ===== -->
+    <section class="card">
+      <h2>手机端</h2>
+      <div class="muted hint">Android 客户端安装包随 CI 发版更新,二维码始终指向最新 Release。</div>
+      <div class="button-row">
+        <button @click="showDownloadQr = !showDownloadQr">
+          {{ showDownloadQr ? '隐藏二维码' : '下载二维码' }}
+        </button>
+        <button @click="copyDownloadUrl">复制下载链接</button>
+      </div>
+      <div v-if="showDownloadQr" class="qr-block">
+        <div class="qr" v-html="downloadQrSvg"></div>
+        <div class="muted hint">手机相机扫码直接下载安装包,无需配对。</div>
       </div>
     </section>
 
