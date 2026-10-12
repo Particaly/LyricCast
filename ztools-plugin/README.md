@@ -60,7 +60,7 @@ node mock-phone.js --token <Token> --speedup 6             # 6 倍速
 
 ```bash
 npm run dev:full   # dev server + dist watch build(推荐)
-npm run dev        # 仅 Vite dev server(http://localhost:5173)
+npm run dev        # 仅 Vite dev server(http://localhost:5236)
 ```
 
 导入的本地插件会读取 `plugin.json` 的 `development.main` 指向 dev 地址,UI 改动热重载;
