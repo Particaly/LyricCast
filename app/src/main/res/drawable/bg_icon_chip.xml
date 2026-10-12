@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 卡片标题图标底座:圆角方块,主色 16% 透明度;与 bg_icon_chip_error 配对使用 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/accent_soft" />
+    <corners android:radius="9dp" />
+</shape>

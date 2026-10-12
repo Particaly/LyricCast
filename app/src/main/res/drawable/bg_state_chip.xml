@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  播放状态小胶囊底形:纯白底,运行时由 MainActivity 以 12% 透明度的状态色
+  backgroundTintList 染色(SRC_IN 保留透明度),文字用同色全透明度。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFFFFF" />
+    <corners android:radius="99dp" />
+</shape>

@@ -37,6 +37,7 @@ class QrScanActivity : AppCompatActivity() {
 
     private lateinit var previewView: PreviewView
     private lateinit var hintText: TextView
+    private lateinit var statusText: TextView
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var analysisExecutor: ExecutorService? = null
@@ -50,7 +51,7 @@ class QrScanActivity : AppCompatActivity() {
             if (granted) {
                 startCamera()
             } else {
-                hintText.text = "需要相机权限才能扫码;请授权后重试,或在设置页手动填写配置"
+                hintText.text = getString(R.string.scan_need_camera)
             }
         }
 
@@ -59,6 +60,7 @@ class QrScanActivity : AppCompatActivity() {
         setContentView(R.layout.activity_qr_scan)
         previewView = findViewById(R.id.preview_view)
         hintText = findViewById(R.id.scan_hint_text)
+        statusText = findViewById(R.id.scan_status_text)
         findViewById<TextView>(R.id.close_button).setOnClickListener { finish() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
@@ -77,7 +79,7 @@ class QrScanActivity : AppCompatActivity() {
             try {
                 val provider = future.get()
                 if (!provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
-                    hintText.text = "本设备没有可用的摄像头,请在设置页手动填写 PC 地址与 Token"
+                    hintText.text = getString(R.string.scan_no_camera)
                     return@addListener
                 }
                 previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -94,7 +96,7 @@ class QrScanActivity : AppCompatActivity() {
                 provider.unbindAll()
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             } catch (e: Exception) {
-                hintText.text = "相机启动失败:${e.message ?: "未知错误"}"
+                hintText.text = getString(R.string.scan_camera_error, e.message ?: "未知错误")
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -135,10 +137,14 @@ class QrScanActivity : AppCompatActivity() {
                     delivered = true
                     mainHandler.post { deliver(info) }
                 } else if (text != lastRejectedText) {
-                    // 同一张无关二维码只提示一次,避免 Toast 刷屏
+                    // 同一张无关二维码只提示一次,避免 Toast 刷屏;链接类内容
+                    // (如插件页新加的"下载二维码")给专门提示,避免误扫后一脸茫然
                     lastRejectedText = text
+                    val isUrl = text.startsWith("http://") || text.startsWith("https://")
+                    val messageRes = if (isUrl) R.string.scan_rejected_url else R.string.scan_rejected_generic
                     mainHandler.post {
-                        Toast.makeText(this, "这不是本应用的配对二维码", Toast.LENGTH_SHORT).show()
+                        statusText.setText(messageRes)
+                        Toast.makeText(this, messageRes, Toast.LENGTH_SHORT).show()
                     }
                 }
             }

@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 扫码页:全屏预览 + 中央取景框 + 底部提示,深色背景与取景框留白提升识别率 -->
+<!--
+  扫码页:全屏预览 + 中央取景框 + 底部提示,深色背景与取景框留白提升识别率。
+  顶部/底部各叠一层渐变遮罩,保证关闭按钮与提示文案在亮画面上仍可读。
+-->
 <FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -10,6 +13,26 @@
         android:id="@+id/preview_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- 顶部遮罩 + 关闭按钮 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="132dp"
+        android:background="@drawable/bg_scrim_top" />
+
+    <TextView
+        android:id="@+id/close_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="20dp"
+        android:layout_marginEnd="20dp"
+        android:background="@drawable/bg_close_pill"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:text="@string/scan_close"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp" />
 
     <LinearLayout
         android:layout_width="wrap_content"
@@ -35,6 +58,13 @@
 
     </LinearLayout>
 
+    <!-- 底部遮罩 + 操作提示 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="160dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bg_scrim_bottom" />
+
     <TextView
         android:id="@+id/scan_hint_text"
         android:layout_width="match_parent"
@@ -44,20 +74,9 @@
         android:layout_marginEnd="32dp"
         android:layout_marginBottom="48dp"
         android:gravity="center"
+        android:lineSpacingExtra="4dp"
         android:text="@string/scan_hint_text"
-        android:textColor="#CCFFFFFF"
-        android:textSize="15sp" />
-
-    <TextView
-        android:id="@+id/close_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_margin="20dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:padding="8dp"
-        android:text="@string/scan_close"
-        android:textColor="#FFFFFF"
+        android:textColor="#E6FFFFFF"
         android:textSize="15sp" />
 
 </FrameLayout>

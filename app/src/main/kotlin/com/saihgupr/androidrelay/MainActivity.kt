@@ -2,6 +2,7 @@ package com.saihgupr.androidrelay
 
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -9,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.view.View
 import android.view.animation.Animation
 import android.view.animation.ScaleAnimation
@@ -18,6 +20,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.ColorUtils
 import org.json.JSONObject
 
 /**
@@ -34,8 +37,9 @@ class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
-     * 扫码配对:QrScanActivity 返回 PC 地址/端口/Token 后,填入 LAN 表单并立即
-     * 保存重启服务(registerForActivityResult 必须在 onCreate 前注册,故为字段)。
+     * 扫码配对:QrScanActivity 返回 PC 地址(含多网卡备选)/端口/Token 后,
+     * 优选与手机同网段的地址填入 LAN 表单并立即保存重启服务
+     * (registerForActivityResult 必须在 onCreate 前注册,故为字段)。
      */
     private val pairScanLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -45,7 +49,11 @@ class MainActivity : AppCompatActivity() {
         val host = data.getStringExtra(QrScanActivity.EXTRA_HOST) ?: return@registerForActivityResult
         val port = data.getIntExtra(QrScanActivity.EXTRA_PORT, LanSettings.DEFAULT_PORT)
         val token = data.getStringExtra(QrScanActivity.EXTRA_TOKEN) ?: return@registerForActivityResult
-        applyQrPairing(host, port, token)
+        val addresses = data.getStringArrayListExtra(QrScanActivity.EXTRA_ADDRESSES)
+            ?.filter { it.isNotBlank() }
+            ?.takeIf { it.isNotEmpty() }
+            ?: listOf(host)
+        applyQrPairing(addresses, port, token)
     }
 
     /**
@@ -74,6 +82,9 @@ class MainActivity : AppCompatActivity() {
     // 英雄卡状态点呼吸动画(懒创建,仅已连接时播放)
     private var heroPulse: Animation? = null
 
+    // 最近一次连接状态(英雄卡大字/详情行/扫码按钮文案共用;applyConnectionState 写入)
+    private var lastStatus: ConnectionUiStatus = ConnectionUiStatus.DISABLED
+
     // 英雄卡描边:bg_card_hero 为运行时改色的专属 drawable(mutate 后不污染共享缓存)
     private var heroStroke: GradientDrawable? = null
 
@@ -86,11 +97,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var keepAliveChevron: View
     private lateinit var keepAliveFlavor: RomFlavor
 
+    // 保存配置后的 rebind 兜底定时(见 scheduleRebindFallback)
+    private val rebindFallback = Runnable { ensureListenerServiceRestarted() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         heroStroke = findViewById<View>(R.id.hero_card).background.mutate() as GradientDrawable
+
+        // 页脚版本号按 PackageManager 实际版本动态填入,避免发版漏改静态文案
+        findViewById<TextView>(R.id.footer_version_text).text =
+            getString(R.string.footer_version, currentVersionName())
 
         val permissionButton = findViewById<Button>(R.id.permission_button)
         val mqttBrokerEdit = findViewById<android.widget.EditText>(R.id.mqtt_broker_edit)
@@ -142,10 +160,9 @@ class MainActivity : AppCompatActivity() {
                 .putString("password", pass)
                 .apply()
 
-            // Restart service to pick up changes
-            val componentName = ComponentName(this, MediaSessionListenerService::class.java)
-            android.service.notification.NotificationListenerService.requestRebind(componentName)
-            Toast.makeText(this, R.string.mqtt_saved_toast, Toast.LENGTH_SHORT).show()
+        // Restart service to pick up changes
+        restartListenerService()
+        Toast.makeText(this, R.string.mqtt_saved_toast, Toast.LENGTH_SHORT).show()
         }
 
         testButton.setOnClickListener { runMqttTest() }
@@ -161,6 +178,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateStatus()
+        // 配置已启用但服务侧仍停在"未启用"时补发一次 rebind(从系统设置授权返回、
+        // 或上次保存后的 rebind 被系统忽略的场景,见 ensureListenerServiceRestarted)
+        ensureListenerServiceRestarted()
         // 保活自检是实时系统状态(电池/通知),回到前台时重查(含从系统设置页返回的场景)
         if (::keepAliveFlavor.isInitialized) updateKeepAliveStatus()
         // 前台保活服务可能因 Android 12+ 后台启动限制(Listener rebind 常在后台)或
@@ -190,30 +210,52 @@ class MainActivity : AppCompatActivity() {
         lanStateListener = null
         trackListener?.let { LanConnectionState.removeTrackListener(it) }
         trackListener = null
-        findViewById<View>(R.id.hero_dot).clearAnimation()
+        findViewById<View>(R.id.hero_halo).clearAnimation()
     }
 
     // ==================== 状态展示 ====================
 
     /**
-     * 把 LAN 连接状态应用到界面各处:英雄卡(大字状态 + 彩色描边 + 呼吸状态点)、
-     * 顶栏状态胶囊、LAN 折叠卡标题的绿色小圆点、卡内行内状态文本与目标地址行。
-     * 未启用(DISABLED)统一展示为"尚未配对"的引导形态。
+     * 把 LAN 连接状态应用到界面各处:英雄卡(大字短标签 + 详情行 + 彩色描边 +
+     * 呼吸光环)、顶栏状态胶囊、LAN 卡标题圆点与卡内行内状态文本。
+     * 大字只放短语(已连接/重连中…),原始状态文本(含断开原因)降级进详情行,
+     * 避免长句撑爆 20sp 标题;未启用按真实原因分化:通知使用权未授权 → "需开启
+     * 通知使用权",已配置但开关关闭 → "同步已关闭",未配置 → "尚未配对"。
      */
     private fun applyConnectionState(connected: Boolean, statusText: String) {
-        val status = ConnectionUi.from(connected, statusText)
+        val status = ConnectionUi.from(connected, statusText, NotificationAccess.granted(this))
+        lastStatus = status
         val color = statusColor(status)
 
         heroStroke?.setStroke(dp(1), color)
         findViewById<View>(R.id.hero_dot).backgroundTintList = ColorStateList.valueOf(color)
+        findViewById<View>(R.id.hero_halo).backgroundTintList =
+            ColorStateList.valueOf(ColorUtils.setAlphaComponent(color, HALO_ALPHA))
         findViewById<View>(R.id.status_dot).backgroundTintList = ColorStateList.valueOf(color)
-        val heroDot = findViewById<View>(R.id.hero_dot)
-        heroDot.clearAnimation()
-        if (status == ConnectionUiStatus.CONNECTED) heroDot.startAnimation(pulse())
+        val heroHalo = findViewById<View>(R.id.hero_halo)
+        heroHalo.clearAnimation()
+        if (status == ConnectionUiStatus.CONNECTED) heroHalo.startAnimation(pulse())
 
-        findViewById<TextView>(R.id.hero_status_text).text =
-            if (status == ConnectionUiStatus.DISABLED) getString(R.string.status_not_paired) else statusText
-        findViewById<TextView>(R.id.status_capsule_text).text = status.shortLabel
+        val hostConfigured = LanSettings.host(this).isNotBlank()
+        findViewById<TextView>(R.id.hero_status_text).text = when (status) {
+            ConnectionUiStatus.DISABLED ->
+                getString(
+                    if (hostConfigured) R.string.status_disabled else R.string.status_not_paired
+                )
+            ConnectionUiStatus.NEEDS_ACCESS -> getString(R.string.status_need_access)
+            else -> status.shortLabel
+        }
+        findViewById<TextView>(R.id.status_capsule_text).apply {
+            text = when (status) {
+                ConnectionUiStatus.DISABLED ->
+                    getString(
+                        if (hostConfigured) R.string.status_disabled else R.string.status_capsule_unpaired
+                    )
+                ConnectionUiStatus.NEEDS_ACCESS -> getString(R.string.status_capsule_need_access)
+                else -> status.shortLabel
+            }
+            setTextColor(color)
+        }
 
         findViewById<View>(R.id.lan_header_dot).visibility =
             if (status == ConnectionUiStatus.CONNECTED) View.VISIBLE else View.GONE
@@ -227,20 +269,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 英雄卡副行:已配置(LAN 开 + 非空地址)时显示"正在同步到 host:port",
-     * 否则显示配对引导文案。保存设置后需手动调用一次刷新。
+     * 英雄卡详情行:按状态给出最有用的那句话 —— 已连接显示目标地址;
+     * 重连/连接中透传原始状态文本(带断开原因);认证失败给排查指引;
+     * 未启用按真实原因分化:未授权通知使用权给授权指引、开关关闭给恢复提示、
+     * 已启用但服务还没起来给等待提示。
+     * 顺带刷新扫码按钮文案:已配对后从"扫码配对"切换为"重新扫码配对"。
+     * 保存设置后需手动调用一次刷新。
      */
     private fun updateHeroTarget() {
         val host = LanSettings.host(this)
-        findViewById<TextView>(R.id.hero_target_text).text =
-            if (LanSettings.isEnabled(this) && host.isNotBlank()) {
+        val targetText = findViewById<TextView>(R.id.hero_target_text)
+        targetText.text = when {
+            lastStatus == ConnectionUiStatus.CONNECTED && host.isNotBlank() ->
                 getString(R.string.lan_target_text, host, LanSettings.port(this))
-            } else {
-                getString(R.string.status_not_paired_hint)
-            }
+            host.isBlank() -> getString(R.string.status_not_paired_hint)
+            lastStatus == ConnectionUiStatus.NEEDS_ACCESS ->
+                getString(R.string.hero_detail_need_access)
+            !LanSettings.isEnabled(this) ->
+                getString(R.string.lan_target_paused_text, host, LanSettings.port(this))
+            lastStatus == ConnectionUiStatus.DISABLED ->
+                getString(R.string.hero_detail_waiting_service)
+            lastStatus == ConnectionUiStatus.AUTH_FAILED ->
+                getString(R.string.hero_detail_auth_failed)
+            else -> LanConnectionState.snapshot().second
+        }
+        findViewById<Button>(R.id.lan_scan_button).setText(
+            if (host.isBlank()) R.string.pair_button else R.string.pair_button_again
+        )
     }
 
-    /** "正在推送"卡:有选中会话时展示曲目与播放态,无会话回到空态引导文案。 */
+    /** "正在推送"卡:有选中会话时展示曲目与播放态(状态胶囊染色),无会话回到空态引导。 */
     private fun applyTrack(track: LanConnectionState.NowPlaying?) {
         val row = findViewById<View>(R.id.now_playing_row)
         val empty = findViewById<TextView>(R.id.now_playing_empty)
@@ -253,23 +311,34 @@ class MainActivity : AppCompatActivity() {
         empty.visibility = View.GONE
         findViewById<TextView>(R.id.now_playing_title).text = track.title
         findViewById<TextView>(R.id.now_playing_artist).text = track.artist
+        val (colorRes, textRes) = if (track.playing) {
+            R.color.status_ok to R.string.now_playing_playing
+        } else {
+            R.color.text_hint to R.string.now_playing_paused
+        }
+        val color = getColor(colorRes)
         findViewById<TextView>(R.id.now_playing_state).apply {
-            text = getString(if (track.playing) R.string.now_playing_playing else R.string.now_playing_paused)
-            setTextColor(getColor(if (track.playing) R.color.status_ok else R.color.text_hint))
+            text = getString(textRes)
+            setTextColor(color)
+            // 胶囊底色:同色 12% 透明度(SRC_IN 保留透明度),与文字同色系
+            backgroundTintList = ColorStateList.valueOf(ColorUtils.setAlphaComponent(color, CHIP_ALPHA))
         }
     }
 
-    /** 连接状态 → 语义色(绿=已连接,橙=连接/重连中,红=认证失败,灰=未启用)。 */
+    /**
+     * 连接状态 → 语义色(绿=已连接,橙=连接/重连中/待授权,红=认证失败,灰=未启用)。
+     */
     private fun statusColor(status: ConnectionUiStatus): Int = getColor(
         when (status) {
             ConnectionUiStatus.CONNECTED -> R.color.status_ok
-            ConnectionUiStatus.CONNECTING, ConnectionUiStatus.RECONNECTING -> R.color.status_warning
+            ConnectionUiStatus.CONNECTING, ConnectionUiStatus.RECONNECTING,
+            ConnectionUiStatus.NEEDS_ACCESS -> R.color.status_warning
             ConnectionUiStatus.AUTH_FAILED -> R.color.status_error
             ConnectionUiStatus.DISABLED -> R.color.text_hint
         }
     )
 
-    /** 已连接时状态点的呼吸动画(缩放往复);懒创建,可安全重复 start。 */
+    /** 已连接时英雄卡光环的呼吸动画(缩放往复);懒创建,可安全重复 start。 */
     private fun pulse(): Animation {
         heroPulse?.let { return it }
         return ScaleAnimation(
@@ -285,8 +354,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 通知监听权限引导卡:仅未授权时显示,授权后整卡消失。 */
     private fun updateStatus() {
-        val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        val isEnabled = enabledListeners?.contains(packageName) == true
+        val isEnabled = NotificationAccess.granted(this)
         findViewById<View>(R.id.guide_card).visibility = if (isEnabled) View.GONE else View.VISIBLE
     }
 
@@ -371,15 +439,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 扫码成功的落地动作:填入 PC 地址/端口/Token、打开 LAN 开关并保存重启服务,
-     * 与手动"保存并重连"完全同一条路径;手动微调仍走表单 + 保存按钮。
+     * 扫码成功的落地动作:优选与手机同网段的地址填入表单(Payload 按 PC 网卡
+     * 枚举顺序编入 IP,虚拟网卡常排在真实网卡前面),其余地址存为备选供重连轮换;
+     * 打开 LAN 开关并保存重启服务,与手动"保存并重连"完全同一条路径。
      * 配对成功后顺势完成:展开 LAN 卡 → 前台服务启动 → 通知权限 → 保活引导。
      */
-    private fun applyQrPairing(host: String, port: Int, token: String) {
+    private fun applyQrPairing(addresses: List<String>, port: Int, token: String) {
+        val host = PairAddressPicker.pick(addresses, PairAddressPicker.localIpv4())
+            ?: addresses.first()
         findViewById<android.widget.EditText>(R.id.lan_host_edit).setText(host)
         findViewById<android.widget.EditText>(R.id.lan_port_edit).setText(port.toString())
         findViewById<android.widget.EditText>(R.id.lan_token_edit).setText(token)
         findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.lan_enabled_switch).isChecked = true
+        // 先落备选地址(同时写入首选),再走统一的保存重启路径
+        LanSettings.savePairingHosts(this, host, addresses)
         saveLanSettings()
         expandLanSection()
         findViewById<TextView>(R.id.lan_test_result_text).text =
@@ -403,9 +476,12 @@ class MainActivity : AppCompatActivity() {
         val blacklistEdit = findViewById<android.widget.EditText>(R.id.lan_blacklist_edit)
 
         val port = portEdit.text.toString().trim().toIntOrNull() ?: LanSettings.DEFAULT_PORT
+        // 手动改了 PC 地址时清掉扫码带来的备选列表,避免轮换到失效的旧地址
+        val newHost = hostEdit.text.toString().trim()
+        if (newHost != LanSettings.host(this)) LanSettings.clearHostAlternates(this)
         lanPrefs.edit()
             .putBoolean("lan_enabled", enabledSwitch.isChecked)
-            .putString("lan_host", hostEdit.text.toString().trim())
+            .putString("lan_host", newHost)
             .putInt("lan_port", port)
             .putString("lan_token", tokenEdit.text.toString().trim())
             .putBoolean("lan_send_artwork", artworkSwitch.isChecked)
@@ -413,9 +489,9 @@ class MainActivity : AppCompatActivity() {
             .putString("lan_app_blacklist", blacklistEdit.text.toString().trim())
             .apply()
 
-        // 重启监听服务,使新配置立即生效
-        val componentName = ComponentName(this, MediaSessionListenerService::class.java)
-        android.service.notification.NotificationListenerService.requestRebind(componentName)
+        // 重启监听服务,使新配置立即生效;4 秒后复查一次,兜底系统忽略/延迟 rebind
+        restartListenerService()
+        scheduleRebindFallback()
         Toast.makeText(this, R.string.lan_saved_toast, Toast.LENGTH_SHORT).show()
 
         // 英雄卡目标地址行跟随新配置;连接状态等服务的重启事件回报后自然刷新
@@ -427,6 +503,49 @@ class MainActivity : AppCompatActivity() {
         } else {
             maybeStartForegroundService()
         }
+    }
+
+    // ==================== 监听服务重启兜底 ====================
+
+    /**
+     * 让监听服务按最新配置(重)启,双保险:
+     * - requestRebind(API 24+):服务已被系统绑定时,请求销毁重建;
+     * - startService:服务**未被系统绑定**时 requestRebind 是静默无效的(部分 ROM
+     *   还会直接忽略 rebind 请求),显式拉起实例让 onCreate/onStartCommand 立即
+     *   按最新配置建立连接 —— 扫码配对后无需重启 App 即可连上。
+     * 两路对已运行实例都安全(重复 start 幂等,onStartCommand 按当前配置重连)。
+     */
+    private fun restartListenerService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            android.service.notification.NotificationListenerService.requestRebind(
+                ComponentName(this, MediaSessionListenerService::class.java)
+            )
+        }
+        try {
+            startService(Intent(this, MediaSessionListenerService::class.java))
+        } catch (e: Exception) {
+            Log.w(TAG, "Start listener service failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
+    /**
+     * rebind 兜底:配置已启用但服务侧仍停在"未启用"(保存后的 rebind 被系统忽略/
+     * 延迟,或授权刚恢复但系统尚未重绑)时,补发一次 rebind 把监听服务拉起来。
+     * 保护条件:未授权时重试无效(系统不绑定监听服务,界面已按"需通知使用权"引导);
+     * 状态已离开"未启用"(连接中/已连接/重连中/认证失败)说明服务已带新配置运行,
+     * 再发 rebind 反而会打断正常连接。
+     */
+    private fun ensureListenerServiceRestarted() {
+        if (!LanSettings.isEnabled(this) || LanSettings.host(this).isBlank()) return
+        if (!NotificationAccess.granted(this)) return
+        if (!LanConnectionState.snapshot().second.startsWith("未启用")) return
+        restartListenerService()
+    }
+
+    /** 保存配置后的延时复查(给系统 rebind 留出销毁重建的窗口);重复保存时重置计时。 */
+    private fun scheduleRebindFallback() {
+        mainHandler.removeCallbacks(rebindFallback)
+        mainHandler.postDelayed(rebindFallback, REBIND_FALLBACK_DELAY_MS)
     }
 
     /**
@@ -463,7 +582,7 @@ class MainActivity : AppCompatActivity() {
 
         lanTestClient = LanPushClient(
             this,
-            host,
+            listOf(host),
             port,
             object : LanPushClient.Listener {
                 override fun onConnected() {
@@ -761,8 +880,29 @@ class MainActivity : AppCompatActivity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    /** 当前版本名(页脚展示用);查询失败时返回"?",不阻塞界面。 */
+    private fun currentVersionName(): String = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0)).versionName
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } ?: "?"
+    } catch (_: Exception) {
+        "?"
+    }
+
     private companion object {
+        private const val TAG = "MainActivity"
+
         /** 自检总项数,仅用于页头"x/4 项待完成"的展示。 */
         const val TOTAL_KEEPALIVE_ITEMS = 4
+
+        /** 保存配置后复查 rebind 是否生效的延时(覆盖系统销毁重建监听服务的窗口)。 */
+        const val REBIND_FALLBACK_DELAY_MS = 4_000L
+
+        /** 英雄卡光环的状态色透明度(30%);播放状态胶囊为 12%。 */
+        const val HALO_ALPHA = 78
+        const val CHIP_ALPHA = 31
     }
 }

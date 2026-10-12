@@ -12,6 +12,9 @@
     <color name="status_error">#FF453A</color>
     <color name="accent_blue_focused">#5AA9FF</color>
     <color name="accent_blue_dim">#2A7ED6</color>
+    <!-- 图标底座 chip:主色 16% 透明度,叠在卡片底色上形成柔和的图标容器 -->
+    <color name="accent_soft">#293A8EF6</color>
+    <color name="accent_error_soft">#29FF453A</color>
     <color name="divider">#2C2C2E</color>
     <color name="stroke">#2C2C2E</color>
 </resources>

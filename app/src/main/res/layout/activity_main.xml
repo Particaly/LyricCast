@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   主界面(2026-10 改版):状态优先的单页结构 ——
-  顶栏(标题+状态胶囊) → 连接英雄卡(状态点+目标地址+正在推送) →
-  条件式权限引导卡 → 扫码配对主入口 → 两张默认折叠的设置卡(LAN / MQTT) → 版本页脚。
-  所有文案来自 values/strings.xml;折叠/展开由 MainActivity 切换 body 可见性实现。
+  顶栏(标题+状态胶囊) → 连接英雄卡(光环状态点+大字状态+详情行+正在推送) →
+  条件式权限引导卡 → 扫码配对主入口 → 三张折叠卡(保活 / LAN / MQTT,标题带图标底座) → 版本页脚。
+  所有文案来自 values/strings.xml;折叠/展开由 MainActivity 切换 body 可见性实现,
+  状态点/胶囊/播放态胶囊的颜色由 MainActivity 按连接状态染色。
 -->
 <ScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -36,6 +37,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:letterSpacing="0.01"
                     android:text="@string/app_name"
                     android:textColor="@color/text_primary"
                     android:textSize="22sp"
@@ -95,13 +97,27 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <View
-                    android:id="@+id/hero_dot"
-                    android:layout_width="14dp"
-                    android:layout_height="14dp"
-                    android:layout_marginEnd="12dp"
-                    android:background="@drawable/bg_dot"
-                    android:backgroundTint="@color/text_hint" />
+                <!-- 状态点 + 呼吸光环:halo 由代码按状态色 30% 透明度染色并播放缩放动画 -->
+                <FrameLayout
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_marginEnd="12dp">
+
+                    <View
+                        android:id="@+id/hero_halo"
+                        android:layout_width="26dp"
+                        android:layout_height="26dp"
+                        android:background="@drawable/bg_dot"
+                        android:backgroundTint="@color/text_hint" />
+
+                    <View
+                        android:id="@+id/hero_dot"
+                        android:layout_width="12dp"
+                        android:layout_height="12dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/bg_dot"
+                        android:backgroundTint="@color/text_hint" />
+                </FrameLayout>
 
                 <TextView
                     android:id="@+id/hero_status_text"
@@ -118,7 +134,7 @@
                 android:id="@+id/hero_target_text"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="26dp"
+                android:layout_marginStart="38dp"
                 android:layout_marginTop="6dp"
                 android:text="@string/status_not_paired_hint"
                 android:textColor="@color/text_secondary"
@@ -150,18 +166,21 @@
                 android:gravity="center_vertical"
                 android:visibility="gone">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="♪"
-                    android:textColor="@color/accent_blue"
-                    android:textSize="18sp" />
+                <!-- 音符图标 + 主色底座:与各卡片标题图标同一套视觉语言 -->
+                <ImageView
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="@drawable/bg_icon_chip"
+                    android:contentDescription="@null"
+                    android:padding="7dp"
+                    android:src="@drawable/ic_music_note" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="10dp"
+                    android:layout_marginStart="12dp"
+                    android:layout_marginEnd="10dp"
                     android:orientation="vertical">
 
                     <TextView
@@ -184,14 +203,17 @@
                         android:textSize="13sp" />
                 </LinearLayout>
 
+                <!-- 播放状态小胶囊:底色/文字色由代码按播放态染色 -->
                 <TextView
                     android:id="@+id/now_playing_state"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
+                    android:background="@drawable/bg_state_chip"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="4dp"
                     android:text="@string/now_playing_paused"
                     android:textColor="@color/text_hint"
-                    android:textSize="12sp" />
+                    android:textSize="11sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -212,11 +234,14 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <View
-                    android:layout_width="8dp"
-                    android:layout_height="8dp"
-                    android:background="@drawable/bg_dot"
-                    android:backgroundTint="@color/status_error" />
+                <!-- 警告图标 + 错误色底座:与各卡片标题图标同一套视觉语言 -->
+                <ImageView
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="@drawable/bg_icon_chip_error"
+                    android:contentDescription="@null"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_alert" />
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -321,10 +346,19 @@
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
 
+                    <ImageView
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_icon_chip"
+                        android:contentDescription="@null"
+                        android:padding="6dp"
+                        android:src="@drawable/ic_shield" />
+
                     <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:layout_marginStart="10dp"
                         android:text="@string/ka_section_title"
                         android:textColor="@color/text_primary"
                         android:textSize="15sp"
@@ -661,10 +695,19 @@
                 android:paddingVertical="18dp"
                 android:background="?attr/selectableItemBackground">
 
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:background="@drawable/bg_icon_chip"
+                    android:contentDescription="@null"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_cast" />
+
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:layout_marginStart="10dp"
                     android:text="@string/lan_section_title"
                     android:textColor="@color/text_primary"
                     android:textSize="15sp"
@@ -876,10 +919,19 @@
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
 
+                    <ImageView
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:background="@drawable/bg_icon_chip"
+                        android:contentDescription="@null"
+                        android:padding="6dp"
+                        android:src="@drawable/ic_cloud" />
+
                     <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:layout_marginStart="10dp"
                         android:text="@string/mqtt_section_title"
                         android:textColor="@color/text_primary"
                         android:textSize="15sp"
@@ -1031,13 +1083,13 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- ==================== 版本页脚 ==================== -->
+        <!-- ==================== 版本页脚(文本由 MainActivity 按实际版本填入) ==================== -->
         <TextView
+            android:id="@+id/footer_version_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
             android:gravity="center"
-            android:text="@string/footer_version"
             android:textColor="@color/text_hint"
             android:textSize="11sp" />
 

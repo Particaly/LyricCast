@@ -15,6 +15,7 @@ object LanSettings {
     private const val PREFS_FILE = "lan_config"
     private const val KEY_ENABLED = "lan_enabled"
     private const val KEY_HOST = "lan_host"
+    private const val KEY_HOST_ALTERNATES = "lan_host_alternates"
     private const val KEY_PORT = "lan_port"
     private const val KEY_TOKEN = "lan_token"
     private const val KEY_SEND_ARTWORK = "lan_send_artwork"
@@ -36,6 +37,36 @@ object LanSettings {
     fun isEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
 
     fun host(context: Context): String = prefs(context).getString(KEY_HOST, "") ?: ""
+
+    /**
+     * 扫码配对携带的备选 PC 地址(二维码中除首选外的其他网卡 IP,逗号分隔)。
+     * 首选连不上时由 [LanPushClient] 轮换尝试;手动修改 PC 地址后会被清空。
+     */
+    fun hostAlternates(context: Context): List<String> =
+        (prefs(context).getString(KEY_HOST_ALTERNATES, "") ?: "")
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+    /**
+     * 保存扫码配对得到的地址组:首选写入表单键(host),其余进备选
+     * (自动去重、剔除与首选相同的项;后续 [com.saihgupr.androidrelay.MainActivity]
+     * 的"保存并重连"会再按表单覆盖其他配置)。
+     */
+    fun savePairingHosts(context: Context, primary: String, candidates: List<String>) {
+        val alternates = candidates.map { it.trim() }
+            .filter { it.isNotEmpty() && it != primary }
+            .distinct()
+        prefs(context).edit()
+            .putString(KEY_HOST, primary)
+            .putString(KEY_HOST_ALTERNATES, alternates.joinToString(","))
+            .apply()
+    }
+
+    /** 清空备选地址(用户手动修改 PC 地址时调用,避免轮换到失效的旧地址)。 */
+    fun clearHostAlternates(context: Context) {
+        prefs(context).edit().remove(KEY_HOST_ALTERNATES).apply()
+    }
 
     fun port(context: Context): Int = prefs(context).getInt(KEY_PORT, DEFAULT_PORT)
 

@@ -28,7 +28,8 @@ import kotlin.math.abs
  *
  * 线程模型:本类状态只在主线程读写(服务的媒体回调、Handler tick 均在主线程);
  * 封面解码/压缩在单线程 executor 完成,结果 post 回主线程发送,天然保序。
- * 本类必须由 [MediaSessionListenerService] 持有生命周期:start()/shutdown() 与服务对齐。
+ * 本类必须由 [MediaSessionListenerService] 持有生命周期:start()/stop()/shutdown()
+ * 与服务的 onCreate、开关切换、onDestroy 对齐。
  *
  * 锁策略(v1.2):WakeLock/WifiLock 由本类经 [ConnectionLocks] 在 LAN 启用期间
  * **全程持有**(启动获取、每 2s tick 续期、shutdown 释放),不再跟随播放状态,
@@ -91,9 +92,9 @@ class LanPushManager(private val context: Context) {
             if (!running) return
             if (authFailed) {
                 // token 错误时已停止自动重连,等待用户改配置
-                LanConnectionState.update(false, "认证失败:请检查 Token")
+                LanConnectionState.update(false, "认证失败：请检查两端 Token 是否一致")
             } else {
-                LanConnectionState.update(false, "已断开($reason),自动重连中…")
+                LanConnectionState.update(false, "已断开($reason)，自动重连中…")
             }
         }
 
@@ -106,7 +107,8 @@ class LanPushManager(private val context: Context) {
 
     /**
      * 启动管理器:读取设置,若 LAN 开关打开则持有保活锁、建立连接并启动心跳/ping 定时器。
-     * 与服务 onCreate 对齐;重复调用安全(锁与连接均复用/重建旧实例)。
+     * 与服务 onCreate/onStartCommand 对齐;重复调用安全(锁复用、旧连接被重建、
+     * 旧定时器先摘再挂),每次都会按当前持久化配置重新建连("保存并重连"的落点)。
      */
     fun start() {
         running = true
@@ -118,22 +120,37 @@ class LanPushManager(private val context: Context) {
         }
         acquireLocks()
         connect()
+        // 显式 start 可能重复触发(服务 onCreate 与 onStartCommand 各一次):
+        // 先摘掉旧定时器再挂新的,避免出现两条并行的 2s tick 链
+        mainHandler.removeCallbacks(tickRunnable)
         mainHandler.post(tickRunnable)
     }
 
-    /** 与服务 onDestroy 对齐:停定时器、断连接、释放封面线程池与保活锁。 */
-    fun shutdown() {
+    /**
+     * 停止 LAN 通道(开关关闭时的落点):断连接、停定时器、释放保活锁并清空曲目展示。
+     * 与 [shutdown] 的区别:封面线程池保留,通道可再次 [start] 复用。
+     */
+    fun stop() {
         running = false
         connected = false
         LanConnectionState.updateTrack(null)
         mainHandler.removeCallbacksAndMessages(null)
         client?.shutdown()
         client = null
-        artworkExecutor.shutdownNow()
         connectionLocks?.releaseAll()
         connectionLocks = null
         LanConnectionState.update(false, "未启用")
     }
+
+    /** 与服务 onDestroy 对齐:停通道并释放封面线程池(之后不可再 start)。 */
+    fun shutdown() {
+        stop()
+        artworkExecutor.shutdownNow()
+    }
+
+    /** LAN 通道是否在运行(服务决定 onListenerConnected 时是否需要补 start)。 */
+    val isRunning: Boolean
+        get() = running
 
     /**
      * 获取保活锁(LAN 启用期全程持有):WakeLock 带 60s 超时靠 tick 续期,
@@ -151,8 +168,16 @@ class LanPushManager(private val context: Context) {
         client?.shutdown()
         val host = LanSettings.host(context)
         val port = LanSettings.port(context)
-        client = LanPushClient(context, host, port, clientListener).also { it.connect() }
-        LanConnectionState.update(false, "连接中 $host:$port …")
+        // 表单首选 + 扫码带来的备选网卡地址(重连失败时由客户端轮换,见 LanPushClient)
+        val hosts = (listOf(host) + LanSettings.hostAlternates(context))
+            .filter { it.isNotBlank() }
+            .distinct()
+        client = LanPushClient(context, hosts, port, clientListener).also { it.connect() }
+        // 多候选时先并行竞速(≤1s)再建连,文案据此说明这段额外等待
+        LanConnectionState.update(
+            false,
+            if (hosts.size > 1) "连接中（竞速 ${hosts.size} 个候选地址…）" else "连接中 $host:$port …"
+        )
     }
 
     // ==================== 数据入口 ====================
@@ -453,7 +478,7 @@ class LanPushManager(private val context: Context) {
                         client = null
                     }
                     connected = false
-                    LanConnectionState.update(false, "认证失败:请检查 Token")
+                    LanConnectionState.update(false, "认证失败：请检查两端 Token 是否一致")
                 } else {
                     Log.w(TAG, "Server error: $code ${message.optString("message")}")
                 }

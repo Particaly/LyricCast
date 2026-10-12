@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 错误色图标底座:权限引导卡等告警场景的圆角方块 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/accent_error_soft" />
+    <corners android:radius="9dp" />
+</shape>

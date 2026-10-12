@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 盾牌图标:后台保活卡标题的视觉锚点(表意"守护后台连接") -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/accent_blue"
+        android:pathData="M12,2L4,5v6c0,5.25 3.4,9.74 8,11 4.6,-1.26 8,-5.75 8,-11L20,5l-8,-3z" />
+</vector>

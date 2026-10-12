@@ -95,4 +95,27 @@ class PairingQrTest {
         assertTrue(info != null)
         assertEquals("192.168.1.5", info?.primaryHost)
     }
+
+    @Test
+    fun `parses multi nic payload with virtual adapter first`() {
+        // 模拟 Windows 多网卡枚举:VMware 宿主网卡排在真实网卡之前(依赖
+        // PairAddressPicker 在落地时优选同网段地址,见 PairAddressPickerTest)
+        val info = PairingQr.parse(
+            "androidrelay://pair?v=1&port=18765&ip=192.168.56.1&ip=192.168.1.100&ip=198.18.0.1&token=$token"
+        )
+        assertEquals(
+            listOf("192.168.56.1", "192.168.1.100", "198.18.0.1"),
+            info?.addresses
+        )
+    }
+
+    @Test
+    fun `rejects download url qr content`() {
+        // 插件设置页另有"下载二维码"(GitHub Release 链接),误扫时应明确拒收
+        assertNull(
+            PairingQr.parse(
+                "https://github.com/ZToolsCenter/LyricCast/releases/latest/download/LyricCast.apk"
+            )
+        )
+    }
 }

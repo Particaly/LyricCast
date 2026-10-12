@@ -42,10 +42,10 @@ class RelayForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "后台播放推送",
+                getString(R.string.notify_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "保持手机与 PC 的播放信息同步"
+                description = getString(R.string.notify_channel_desc)
                 setShowBadge(false)
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -123,7 +123,11 @@ class RelayForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_relay)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(ForegroundStatus.label(lanEnabled, connected, statusText))
+            .setContentText(
+                ForegroundStatus.label(
+                    lanEnabled, connected, statusText, NotificationAccess.granted(this)
+                )
+            )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)

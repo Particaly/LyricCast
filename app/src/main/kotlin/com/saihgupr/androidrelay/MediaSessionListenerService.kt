@@ -1,6 +1,7 @@
 package com.saihgupr.androidrelay
 
 import android.content.ComponentName
+import android.content.Intent
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -11,6 +12,15 @@ import android.service.notification.NotificationListenerService
 import android.util.Log
 import org.json.JSONObject
 
+/**
+ * 媒体会话监听 + LAN/MQTT 推送的宿主服务。
+ *
+ * 两条实例来源:系统在通知使用权授予后绑定(媒体会话数据的唯一合法来源);
+ * MainActivity 在保存/扫码配对后显式 startService 拉起 —— 服务未被系统绑定
+ * (或 ROM 忽略 rebind 请求)时,requestRebind 静默无效,显式拉起能让
+ * LAN 连接立即建立。两路共用同一实例:onCreate 创建管理器但不启动,
+ * 由先到达的 onStartCommand(显式)或 onListenerConnected(系统)启动。
+ */
 class MediaSessionListenerService : NotificationListenerService(), MediaSessionManager.OnActiveSessionsChangedListener {
 
     private lateinit var mediaSessionManager: MediaSessionManager
@@ -31,12 +41,34 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         mediaSessionManager = getSystemService(MEDIA_SESSION_SERVICE) as MediaSessionManager
         mqttClient = MqttRelay(this)
         mqttClient.connect()
-        lanPushManager = LanPushManager(this).also { it.start() }
+        // 只创建不启动:启动时点由先到达的 onStartCommand / onListenerConnected 决定,
+        // 避免显式拉起路径(两者都会到)重复触发连接重建
+        lanPushManager = LanPushManager(this)
+    }
+
+    /**
+     * 显式 startService 的落地(MainActivity 保存/配对后的双保险之一):
+     * 按最新持久化配置启动 LAN 通道(等效"保存并重连",配置变更即时生效),
+     * 开关关闭时停通道。系统绑定不会走到这里;重复 start 幂等(旧连接被重建)。
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "Service started explicitly (lanEnabled=${LanSettings.isEnabled(this)})")
+        if (LanSettings.isEnabled(this)) {
+            lanPushManager?.start()
+        } else {
+            lanPushManager?.stop()
+        }
+        return START_STICKY
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         Log.i(TAG, "Listener Connected")
+        // 系统绑定 joining 已被显式拉起的实例时不重复 start(通道已在运行);
+        // 纯系统绑定路径(未显式 start 过)在此启动,媒体回调随即可用
+        if (lanPushManager?.isRunning != true) {
+            lanPushManager?.start()
+        }
         val componentName = ComponentName(this, MediaSessionListenerService::class.java)
         mediaSessionManager.addOnActiveSessionsChangedListener(this, componentName)
         updateActiveSessions(mediaSessionManager.getActiveSessions(componentName))
