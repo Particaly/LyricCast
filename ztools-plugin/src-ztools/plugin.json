@@ -5,11 +5,12 @@
   "description": "将手机上正在播放的歌曲歌词投屏到电脑上",
   "author": "皮皮虾我们走",
   "version": "0.4.0",
+  "categories": ["media"],
   "main": "dist/index.html",
   "preload": "preload/server.js",
   "logo": "logo.png",
   "development": {
-    "main": "http://localhost:5173"
+    "main": "http://localhost:5236"
   },
   "pluginSetting": {
     "backgroundRunning": true

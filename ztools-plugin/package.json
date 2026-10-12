@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:full": "node scripts/dev.mjs",
-    "build": "vue-tsc && vite build",
+    "build": "npm install --prefix src-ztools/preload --omit=dev && vue-tsc && vite build",
     "build:watch": "vite build --watch",
     "test": "vitest run",
     "test:watch": "vitest"
