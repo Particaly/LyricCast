@@ -2,10 +2,13 @@
 /**
  * 桌面悬浮歌词胶囊(独立透明窗口的整页 UI)。
  * - 状态来自 desktop-state(主窗口推送),本地不做任何网络/服务调用;
- * - 歌词展示:ok 状态用推送的整首行文本自建统一行高的滚动轨道,裁剪窗口保持
- *   旧版 2 行视图(开翻译 = 当前句 + 译文;关翻译 = 当前句 + 下一句),窗口在
- *   胶囊内垂直居中;行推进经 CSS transform 过渡平滑上滑一行(与首页歌词同款
- *   手感),seek/切歌等跨行跳变直接落位;文本水平对齐(左/居中)可设置;
+ * - 歌词展示:ok 状态用推送的整首行文本自建滚动轨道,行高按行计算(仅携带译文的
+ *   行在文本盒下预留译文槽,无译文的歌不留空档),裁剪窗口固定展示 2 行(当前句 +
+ *   下一句预告),预备行以下整行隐藏(恒定窗口在两行都无译文时余出的底部空档
+ *   不许第三行探入),行间距可设置,行区垂直位置可整体上下平移,窗口在胶囊内
+ *   垂直居中;行推进经 CSS transform 过渡平滑上滑一行(与首页歌词同款手感),
+ *   seek/切歌等跨行跳变直接落位;
+ *   文本水平对齐(左/居中)可设置;
  *   其余状态回落主行/副行占位文案;
  * - 进度条按推送锚点 + speed 本地插值(rAF),推送频率无需高;
  * - 整个胶囊为拖动区(-webkit-app-region),顶部居中悬停浮现快捷工具栏
@@ -128,11 +131,46 @@ const activeIndex = computed(() => (desktopState.status === 'ok' ? desktopState.
 /** 译文行展开高度:与 .trans.open 的 CSS 高度保持同源,供行高计算使用 */
 const transHeight = computed(() => Math.ceil(Math.max(12, fontSize.value * 0.5) * 1.3))
 
-/** 轨道统一行高 = 主行盒高(fs×1.22)+ 开翻译时的译文槽;
- * 全部行同高,当前行放大与译文展开都收在行内,不影响定位公式 */
-const rowHeight = computed(() =>
-  Math.ceil(fontSize.value * 1.22) + (translationOn.value ? transHeight.value : 0)
-)
+/** 行间距(px):当前句与预备句之间的额外垂直间距,负值收紧
+ * (与 settings.ts 的 DESKTOP_LINE_GAP_RANGE 同源,推送值已由主窗口 sanitize) */
+const lineGap = computed(() => {
+  const value = desktopState.style.lineGap
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+})
+
+/** 主行文本盒高(fs×1.22):所有行共用的固定文字槽,行内文字在其中垂直居中 */
+const textHeight = computed(() => Math.ceil(fontSize.value * 1.22))
+
+/** 行盒基础高 = 文本盒 + 行间距,不含译文槽 */
+const baseRowHeight = computed(() => textHeight.value + lineGap.value)
+
+/** 行区垂直偏移(px):歌词块(含裁剪窗口)在胶囊内整体上下平移,正值下移;
+ * 不设上下限,极端值会把歌词推出胶囊外,由使用者自己负责 */
+const lineOffset = computed(() => {
+  const value = desktopState.style.lineOffset
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+})
+
+/** 按行计算行高:仅「开翻译且该行确实携带译文」的行在文本盒下预留译文槽。
+ * 没有译文的歌不再整首背上槽高(那是句间距观感明显的根源),个别行缺译文也不留空档;
+ * 有译文的行推进到当前位时译文就地展开,行高过渡让相邻行柔和让位 */
+function rowHeightOf(index: number): number {
+  if (!translationOn.value) return baseRowHeight.value
+  const hasTrans = !!desktopState.translations[index]
+  return hasTrans ? baseRowHeight.value + transHeight.value : baseRowHeight.value
+}
+
+/** 各行行顶位置(前缀和):滚动定位公式改用行顶,offset = -当前行的行顶,
+ * 不再要求全轨道统一行高 */
+const rowTops = computed<number[]>(() => {
+  const tops: number[] = []
+  let acc = 0
+  for (let i = 0; i < desktopState.lines.length; i++) {
+    tops.push(acc)
+    acc += rowHeightOf(i)
+  }
+  return tops
+})
 
 /** 当前行译文:翻译开关开启且有对应译文时展开在当前行下方(仅当前行) */
 const activeTranslation = computed(() => {
@@ -142,13 +180,20 @@ const activeTranslation = computed(() => {
   return desktopState.translations[index] ?? ''
 })
 
-// 裁剪窗口保持旧版 2 行视图:开翻译 = 当前句 + 译文(1 个行高,译文槽收在行内),
-// 关翻译 = 当前句 + 下一句(2 个行高);窗口在胶囊内垂直居中(与旧版几何一致),
-// 轨道 offset = -index×行高,行推进经 CSS transform 过渡上滑一行,无需测量视口
-const windowHeight = computed(() => (translationOn.value ? rowHeight.value : rowHeight.value * 2))
-
 /** 轨道定位用的行下标:尚未唱到第一句时按 0 处理,第一行停在窗口主行位,进场不突兀 */
 const trackIndex = computed(() => Math.max(0, activeIndex.value))
+
+// 裁剪窗口 = 最大行框(开翻译时的最坏行高)+ 预备句文本盒 + 少量底部余量。
+// 高度必须跨行推进恒定:窗口在胶囊内垂直居中,行进中窗口一变高,裁剪边缘立即
+// 跳动,上滑动画就毁了;多出的空间留在窗口底部渐隐区之外,内容不动看不出。
+// 最大行框只在「全曲确实携带译文」时计入译文槽,与 desktop-bridge 的胶囊自动
+// 加高同口径:零译文歌若仍预留槽,窗口底部会多出一截空档,第三行直接探进窗口
+const WINDOW_TAIL = 6 // 与 desktop-bridge 的胶囊自动加高计算同值
+const songHasTranslation = computed(() => desktopState.translations.some((text) => !!text))
+const maxRowHeight = computed(() =>
+  baseRowHeight.value + (translationOn.value && songHasTranslation.value ? transHeight.value : 0)
+)
+const windowHeight = computed(() => maxRowHeight.value + baseRowHeight.value + WINDOW_TAIL)
 
 /** 文本水平对齐:左对齐(默认,旧版观感)/ 居中 */
 const alignMode = computed(() => (desktopState.style.align === 'center' ? 'center' : 'left'))
@@ -157,14 +202,22 @@ const containerOffset = ref(0)
 const animate = ref(true)
 
 watch(
-  [trackIndex, rowHeight, () => desktopState.linesVersion],
-  ([index, rowH, version], previous) => {
+  [trackIndex, rowTops, () => desktopState.linesVersion],
+  ([index, tops, version], previous) => {
     const previousIndex = previous ? previous[0] : -2
-    // 三类直接落位(不播滚动动画):首次到位;行高变化(字号/翻译开关调整,过渡只会拖尾);
-    // linesVersion 变化 = 歌词整体重建(切歌/重新匹配)。行推进 |Δ|≤3 播滚动动画
-    const snap = !previous || rowH !== previous[1] || version !== previous[2]
+    const previousTops = previous ? previous[1] : null
+    // 行顶表必须按内容比对:主窗口每次推送都换新的 lines/translations 数组引用,
+    // rowTops 随之重算出新引用,按引用比对会把每次推送都误判成轨道重建,
+    // 行推进永远走「直接落位」,上滑动画就没了(数字行高时代按值比对无此问题)
+    const topsChanged =
+      !!previousTops &&
+      (previousTops.length !== tops.length || previousTops.some((top, i) => top !== tops[i]))
+    // 三类直接落位(不播滚动动画):首次到位;行顶实际变化(字号/行间距/翻译开关/
+    // 译文内容变化,过渡只会拖尾);linesVersion 变化 = 歌词整体重建(切歌/重新匹配)。
+    // 行推进 |Δ|≤3 播滚动动画
+    const snap = !previous || topsChanged || version !== previous[2]
     animate.value = !snap && Math.abs(index - previousIndex) <= 3
-    containerOffset.value = -index * rowH
+    containerOffset.value = -(tops[index] ?? 0)
   },
   { immediate: true }
 )
@@ -202,7 +255,12 @@ function onOpacityCommit(event: Event) {
 const SIZE_LIMITS = { minWidth: 360, maxWidth: 1600, minHeight: 96, maxHeight: 400 }
 /** .stage 四周透明留白,与 desktop-bridge 的 STAGE_PADDING 同值 */
 const STAGE_PAD = 5
+/** 胶囊上下内边距 14+18,与 desktop-bridge 的 PILL_PADDING_V 同值 */
+const PILL_PADDING_V = 32
 const RESIZE_DIRS: DesktopResizeDir[] = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se']
+/** 内容最小胶囊高:两行轨道(窗口高)+ 上下内边距。拖拽缩放的高度下限随
+ * 字号/翻译/行间距跟进,与主窗口的自动加高同源,歌词永远完整可见 */
+const contentMinHeight = computed(() => windowHeight.value + PILL_PADDING_V)
 const pushedSize = computed(() => {
   const width = desktopState.style.width
   const height = desktopState.style.height
@@ -293,7 +351,7 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
     if (dir.includes('n')) height = start.height - dy
     localSize.value = {
       width: clampSize(width, SIZE_LIMITS.minWidth, SIZE_LIMITS.maxWidth),
-      height: clampSize(height, SIZE_LIMITS.minHeight, SIZE_LIMITS.maxHeight)
+      height: clampSize(height, Math.max(SIZE_LIMITS.minHeight, contentMinHeight.value), SIZE_LIMITS.maxHeight)
     }
     // 主窗口 100ms 消费一次并合并,33ms 入队足够跟手且不撑爆消息队列
     const now = Date.now()
@@ -330,8 +388,16 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
     }"
   >
     <div class="pill" :class="{ locked, hovered, resizing }" :style="pillAnchorStyle">
-      <div class="lines" :style="{ '--trans-h': transHeight + 'px', '--win-h': windowHeight + 'px' }">
-        <!-- 歌词窗口:2 行视图(当前句 + 翻译/下一句)垂直居中,内部轨道随行推进平滑上滑 -->
+      <div
+        class="lines"
+        :style="{
+          '--trans-h': transHeight + 'px',
+          '--text-h': textHeight + 'px',
+          '--win-h': windowHeight + 'px',
+          '--line-offset': lineOffset + 'px'
+        }"
+      >
+        <!-- 歌词窗口:2 行视图(当前句[含译文] + 下一句)垂直居中,内部轨道随行推进平滑上滑 -->
         <div
           v-if="hasTrack"
           class="window"
@@ -346,8 +412,8 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
               v-for="(line, index) in desktopState.lines"
               :key="index"
               class="row"
-              :class="{ active: index === activeIndex }"
-              :style="{ height: rowHeight + 'px' }"
+              :class="{ active: index === activeIndex, beyond: index > trackIndex + 1 }"
+              :style="{ height: rowHeightOf(index) + 'px' }"
             >
               <div class="text">{{ line }}</div>
               <div class="trans" :class="{ open: index === activeIndex && activeTranslation }">
@@ -480,7 +546,8 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
 }
 
 /* 歌词视口:占满胶囊内高(align-self 覆盖 .pill 的 align-items:center),
-   裁剪窗口在其中垂直居中,与旧版双行观感一致 */
+   裁剪窗口在其中垂直居中,与旧版双行观感一致;
+   --line-offset 整块上下平移(裁剪窗口随之移动),正值下移 */
 .lines {
   flex: 1;
   min-width: 0;
@@ -490,10 +557,11 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
   justify-content: center;
   position: relative;
   overflow: hidden;
+  transform: translateY(var(--line-offset, 0px));
 }
 
-/* 歌词窗口:高度 = 开翻译 1 行 / 关翻译 2 行(--win-h),窗口外行一律裁掉;
-   上下 5px 渐隐软化行进出窗口边缘的硬切割 */
+/* 歌词窗口:当前行框 + 预备句文本盒 + 少量余量,行框内空置的译文槽尾巴被裁掉;
+   窗口外内容一律裁掉,上下 5px 渐隐软化行进出窗口边缘的硬切割 */
 .window {
   height: var(--win-h, 64px);
   overflow: hidden;
@@ -518,12 +586,21 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
   transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* 统一行高轨道:行内垂直居中;当前行文字放大加亮,推进时随轨道一起上滑
-   (字号过渡让「下一句」在滑入主行位的过程中长大,与首页同款 morph) */
+/* 变高行轨道:行高按行计算(携带译文的行多出译文槽),文字固定在行首的文本盒
+   (--text-h)内,槽收在盒下、非当前行空置不占视觉;当前行文字放大加亮,推进时
+   随轨道一起上滑(字号过渡让「下一句」在滑入主行位的过程中长大,与首页同款
+   morph);行高过渡让译文槽就地展开/收起时相邻行柔和让位 */
 .row {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  transition: height 0.25s, opacity 0.25s;
+}
+
+/* 预备行以下整行不可见:窗口按最坏行高恒定裁剪,当前行/预备行恰好都没译文槽时
+   底部会余出一截空档,第三行会探进渐隐区之上;淡入过渡让行推进时新预备行从
+   空档区柔和浮现,不硬蹦 */
+.row.beyond {
+  opacity: 0;
 }
 
 /* 对齐方式:左对齐(旧版观感)/ 居中,作用于行内文字与译文 */
@@ -545,8 +622,11 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
 
 .row .text {
   max-width: 100%;
-  font-size: calc(var(--fs) * 0.5);
-  line-height: 1.22;
+  /* 固定文本盒 + 等高行高:单行文字在其中自动垂直居中,行推进/字号 morph 时
+     盒子不动,当前行放大与译文展开都不挤占相邻行的文字位置 */
+  height: var(--text-h, 32px);
+  line-height: var(--text-h, 32px);
+  font-size: calc(var(--fs) * 0.62);
   font-weight: 500;
   opacity: 0.62;
   white-space: nowrap;

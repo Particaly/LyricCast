@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 设置页:桌面歌词 / 歌词显示与校准 / 连接(设备、配对二维码、端口 Token)/ 手机端下载 / 关于。
+ * 设置页:桌面歌词 / 歌词显示与校准 / 连接(设备、配对二维码、端口 Token)/ 手机端下载 / 开发者选项 / 关于。
  * 所有可调项走 settings.updateSettings 持久化;连接配置仍由 preload 的 lanLyrics 服务管理。
  */
 import { computed, ref } from 'vue'
@@ -8,13 +8,14 @@ import qrcode from 'qrcode-generator'
 import { activeState, applyOffset, offsetUi, userOffset, ui } from '../store'
 import {
   DESKTOP_FONT_RANGE,
+  DESKTOP_LINE_GAP_RANGE,
   DESKTOP_OPACITY_RANGE,
   MAIN_FONT_RANGE,
   settings,
   updateSettings,
   type DesktopTheme
 } from '../settings'
-import { resetDesktopPosition } from '../desktop-bridge'
+import { openDesktopDevTools, resetDesktopPosition } from '../desktop-bridge'
 import { buildPairingPayload } from '../qr/pair-qr'
 import { APK_DOWNLOAD_URL, buildDownloadQrSvg } from '../qr/download-qr'
 
@@ -29,6 +30,26 @@ function bumpFontSize(key: 'desktopFontSize' | 'mainFontSize', delta: number) {
   const range = key === 'desktopFontSize' ? DESKTOP_FONT_RANGE : MAIN_FONT_RANGE
   const current = settings[key]
   updateSettings({ [key]: Math.min(range.max, Math.max(range.min, current + delta)) })
+}
+
+/** 桌面歌词行间距步进:负值收紧两句间隔,正值放宽;胶囊高度会自动跟进 */
+function bumpLineGap(delta: number) {
+  const { min, max } = DESKTOP_LINE_GAP_RANGE
+  updateSettings({ desktopLineGap: Math.min(max, Math.max(min, settings.desktopLineGap + delta)) })
+}
+
+/** 桌面歌词行区垂直偏移步进:歌词块整体上下平移,正值下移;不设上下限 */
+function bumpLineOffset(delta: number) {
+  updateSettings({ desktopLineOffset: settings.desktopLineOffset + delta })
+}
+
+// ===== 开发者选项 =====
+const devtoolsError = ref('')
+
+/** 打开悬浮歌词窗口的 DevTools(独立窗口);失败原因就地展示 */
+function openOverlayDevtools() {
+  const result = openDesktopDevTools()
+  devtoolsError.value = result.ok ? '' : result.error || '打开失败'
 }
 
 /** 桌面歌词背景不透明度(滑杆松手提交,updateSettings 内部会裁剪到合法区间) */
@@ -184,6 +205,28 @@ function regenerateToken() {
             <button @click="bumpFontSize('desktopFontSize', -2)">A−</button>
             <span class="mono">{{ settings.desktopFontSize }}px</span>
             <button @click="bumpFontSize('desktopFontSize', 2)">A+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">行间距</div>
+            <div class="setting-hint">当前句与预备句的间隔,负值更紧;窗口高度随字号与行距自动加高</div>
+          </div>
+          <div class="stepper">
+            <button @click="bumpLineGap(-2)">−</button>
+            <span class="mono">{{ settings.desktopLineGap }}px</span>
+            <button @click="bumpLineGap(2)">+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">垂直位置</div>
+            <div class="setting-hint">歌词块整体上下平移,正值下移;用于微调歌词在胶囊内的位置</div>
+          </div>
+          <div class="stepper">
+            <button @click="bumpLineOffset(-1)">−</button>
+            <span class="mono">{{ settings.desktopLineOffset }}px</span>
+            <button @click="bumpLineOffset(1)">+</button>
           </div>
         </div>
         <div class="setting-row">
@@ -534,6 +577,19 @@ function regenerateToken() {
         <div class="qr" v-html="downloadQrSvg"></div>
         <div class="muted hint">手机相机扫码直接下载安装包,无需配对。</div>
       </div>
+    </section>
+
+    <!-- ===== 开发者选项 ===== -->
+    <section class="card">
+      <h2>开发者选项</h2>
+      <div class="setting-row">
+        <div class="setting-label">
+          <div class="setting-title">悬浮窗 DevTools</div>
+          <div class="setting-hint">在独立窗口打开桌面歌词悬浮页的开发者工具,排查样式与推送问题;需先开启悬浮歌词</div>
+        </div>
+        <button @click="openOverlayDevtools">打开 DevTools</button>
+      </div>
+      <div v-if="devtoolsError" class="error-tip">{{ devtoolsError }}</div>
     </section>
 
     <!-- ===== 关于 ===== -->

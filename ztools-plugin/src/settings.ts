@@ -31,6 +31,10 @@ export interface Settings {
   desktopWidth: number
   /** 桌面歌词胶囊高度(px;悬浮窗高 = 胶囊高 + 上下各 5px 透明留白) */
   desktopHeight: number
+  /** 桌面歌词行间距(px):当前句与预备句之间的额外垂直间距,负值收紧 */
+  desktopLineGap: number
+  /** 桌面歌词行区垂直偏移(px):歌词块整体上下平移,正值下移;不设上下限 */
+  desktopLineOffset: number
   /** 歌词来源:LRCLIB(主源)开关 */
   providerLrclib: boolean
   /** 歌词来源:网易云(中文回退)开关 */
@@ -60,6 +64,9 @@ export const DESKTOP_FONT_RANGE = { min: 16, max: 42 }
 export const DESKTOP_OPACITY_RANGE = { min: 0, max: 100 }
 /** 胶囊尺寸范围;下限保证顶部工具栏放得下,悬浮窗是哑渲染器,范围在 DesktopLyrics.vue 内有同值副本 */
 export const DESKTOP_SIZE_RANGE = { minWidth: 360, maxWidth: 1600, minHeight: 96, maxHeight: 400 }
+/** 桌面歌词行间距(px):当前句与预备句之间的额外垂直间距,负值收紧;
+ * 下限保证开翻译时预备句不与译文文字重叠(悬浮窗为同值副本) */
+export const DESKTOP_LINE_GAP_RANGE = { min: -4, max: 32 }
 export const MAIN_FONT_RANGE = { min: 12, max: 30 }
 
 const DEFAULTS: Settings = {
@@ -79,6 +86,8 @@ const DEFAULTS: Settings = {
   desktopOpacity: 90,
   desktopWidth: 870,
   desktopHeight: 138,
+  desktopLineGap: 0,
+  desktopLineOffset: 0,
   mainFontSize: 16,
   translation: true,
   traditionalToSimplified: false
@@ -98,6 +107,9 @@ function sanitize(raw: unknown): Settings {
     const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : NaN
     return Number.isNaN(n) ? fallback : Math.min(max, Math.max(min, n))
   }
+  // 无上下限的数值字段:只要求有限数并取整,大小不裁剪(如行区垂直偏移)
+  const finite = (value: unknown, fallback: number): number =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
   return {
     providerLrclib: typeof input.providerLrclib === 'boolean' ? input.providerLrclib : DEFAULTS.providerLrclib,
     providerNetease: typeof input.providerNetease === 'boolean' ? input.providerNetease : DEFAULTS.providerNetease,
@@ -123,6 +135,13 @@ function sanitize(raw: unknown): Settings {
     desktopOpacity: clamp(input.desktopOpacity, DESKTOP_OPACITY_RANGE.min, DESKTOP_OPACITY_RANGE.max, DEFAULTS.desktopOpacity),
     desktopWidth: clamp(input.desktopWidth, DESKTOP_SIZE_RANGE.minWidth, DESKTOP_SIZE_RANGE.maxWidth, DEFAULTS.desktopWidth),
     desktopHeight: clamp(input.desktopHeight, DESKTOP_SIZE_RANGE.minHeight, DESKTOP_SIZE_RANGE.maxHeight, DEFAULTS.desktopHeight),
+    desktopLineGap: clamp(
+      input.desktopLineGap,
+      DESKTOP_LINE_GAP_RANGE.min,
+      DESKTOP_LINE_GAP_RANGE.max,
+      DEFAULTS.desktopLineGap
+    ),
+    desktopLineOffset: finite(input.desktopLineOffset, DEFAULTS.desktopLineOffset),
     mainFontSize: clamp(input.mainFontSize, MAIN_FONT_RANGE.min, MAIN_FONT_RANGE.max, DEFAULTS.mainFontSize),
     translation: typeof input.translation === 'boolean' ? input.translation : DEFAULTS.translation,
     traditionalToSimplified:
@@ -157,6 +176,25 @@ export function updateSettings(patch: Partial<Settings>): void {
   try {
     storage().setItem(SETTINGS_KEY, JSON.stringify(settings))
   } catch (_) { /* 持久化失败不影响本次会话 */ }
+}
+
+/**
+ * 桌面歌词滚动轨道的行几何(与 DesktopLyrics.vue 内的渲染公式保持同源):
+ * - 文本盒高 = ceil(字号×1.22),行内文字的固定槽;
+ * - 译文槽高 = ceil(max(12, 字号×0.5)×1.3),translation 为 true 时计入行高
+ *   (调用方按「当前歌曲确实携带译文」传入,无译文的歌不留空档);
+ * - 行高 = 文本盒 + 译文槽 + 行间距(带译文行的行高),胶囊高度计算基于它。
+ * 主窗口据此计算胶囊最小高度(悬浮窗不加载本模块,渲染侧有同式副本)。
+ */
+export function desktopRowMetrics(
+  fontSize: number,
+  translation: boolean,
+  lineGap: number
+): { textHeight: number; transHeight: number; rowHeight: number } {
+  const textHeight = Math.ceil(fontSize * 1.22)
+  const transHeight = translation ? Math.ceil(Math.max(12, fontSize * 0.5) * 1.3) : 0
+  const rowHeight = textHeight + transHeight + lineGap
+  return { textHeight, transHeight, rowHeight }
 }
 
 function safeParse(text: string): unknown {

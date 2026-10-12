@@ -20,6 +20,8 @@
 import { displayAnchor, lyric, userOffset } from './store'
 import {
   DESKTOP_FONT_RANGE,
+  DESKTOP_SIZE_RANGE,
+  desktopRowMetrics,
   settings,
   updateSettings,
   type DesktopAlign,
@@ -55,6 +57,10 @@ export interface DesktopPush {
     width: number
     /** 胶囊高度(px) */
     height: number
+    /** 行间距(px):当前句与预备句之间的额外垂直间距,负值收紧 */
+    lineGap: number
+    /** 行区垂直偏移(px):歌词块整体上下平移,正值下移 */
+    lineOffset: number
   }
   status: 'ok' | 'loading' | 'nolyrics' | 'noplayback' | 'offline'
   track: { title: string; artist: string } | null
@@ -96,7 +102,11 @@ interface WindowInstanceShim {
   getSize?: () => [number, number]
   getBounds: () => { x: number; y: number; width: number; height: number }
   setAlwaysOnTop?: (flag: boolean) => void
-  webContents: { executeJavaScript: <T>(code: string, userGesture?: boolean) => Promise<T> }
+  webContents: {
+    executeJavaScript: <T>(code: string, userGesture?: boolean) => Promise<T>
+    /** Electron webContents 透传;旧版 ZTools 可能未代理,打开 DevTools 前需判存 */
+    openDevTools?: (options?: { mode?: string }) => void
+  }
 }
 
 let winRef: WindowInstanceShim | null = null
@@ -205,7 +215,8 @@ function createWindow(): CreateWindowResult {
         hasShadow: false,
         focusable: false,
         title: '桌面歌词',
-        webPreferences: { zoomFactor: 1, devTools: false, nodeIntegration: false }
+        // devTools 保持开启:设置页开发者选项可按需打开悬浮窗 DevTools,平时不自动弹出
+        webPreferences: { zoomFactor: 1, devTools: true, nodeIntegration: false }
       },
       () => {
         // load 完成后再显示,避免闪白底
@@ -223,9 +234,35 @@ function createWindow(): CreateWindowResult {
   }
 }
 
+/** 窗口内歌词轨道的布局常量(与 DesktopLyrics.vue 保持同值):
+ * 胶囊上下内边距 14+18;裁剪窗口在预备句文本盒之下保留的底部余量 */
+const PILL_PADDING_V = 32
+const WINDOW_TAIL = 6
+
+/** 当前字号/行间距下,悬浮窗完整展示两行轨道所需的胶囊高度。
+ * 翻译按「当前歌曲确实携带译文」计:无译文的歌行高不含译文槽,与悬浮窗渲染同源 */
+function desktopNeededHeight(): number {
+  const translation = settings.desktopTranslation && lyric.translationMap.size > 0
+  const { textHeight, rowHeight } = desktopRowMetrics(
+    settings.desktopFontSize,
+    translation,
+    settings.desktopLineGap
+  )
+  const needed = rowHeight + textHeight + WINDOW_TAIL + PILL_PADDING_V
+  return Math.min(DESKTOP_SIZE_RANGE.maxHeight, Math.max(DESKTOP_SIZE_RANGE.minHeight, needed))
+}
+
+/** 胶囊装不下两行轨道时自动加高(只增不减,不回收手动缩小的高度):
+ * 字号/翻译/行间距调大后预备句会被裁剪窗口裁出胶囊外,这里保证内容始终完整可见 */
+function ensureCapsuleFitsContent(): void {
+  const needed = desktopNeededHeight()
+  if (settings.desktopHeight < needed) updateSettings({ desktopHeight: needed })
+}
+
 /** 开启桌面歌词;悬浮窗已存在(主窗口重载后模块状态保留)则直接复用。
  * 失败时 error 携带真实原因(如 URL 校验拒绝),供设置页直接展示 */
 export function enableDesktopLyrics(): { ok: boolean; error?: string } {
+  ensureCapsuleFitsContent()
   if (winRef && !winRef.isDestroyed?.()) {
     winRef.show()
     applyWindowSize()
@@ -290,9 +327,11 @@ function applyWindowSize(dir?: DesktopResizeDir): void {
   } catch (_) { /* 已销毁 */ }
 }
 
-/** 样式/尺寸相关设置变化后调用:同步窗口尺寸并立即重推(字号/主题/翻译/锁定/透明度/尺寸) */
+/** 样式/尺寸相关设置变化后调用:胶囊高度不足时自动加高,同步窗口尺寸并立即重推
+ * (字号/主题/翻译/锁定/透明度/尺寸/行间距);加高会再触发一次本函数,幂等无环 */
 export function notifyStyleChanged(): void {
   if (!winRef) return
+  ensureCapsuleFitsContent()
   applyWindowSize()
   syncDesktopLyrics(undefined, true)
 }
@@ -304,6 +343,22 @@ export function resetDesktopPosition(): void {
   try {
     winRef?.setPosition(position.x, position.y)
   } catch (_) { /* 窗口已销毁 */ }
+}
+
+/** 打开悬浮窗 DevTools(设置页开发者选项):detach 模式开独立窗口,不改变悬浮窗
+ * 自身尺寸(透明置顶窗不适合停靠);窗口未开启/旧版 ZTools 未透传方法时报错给设置页 */
+export function openDesktopDevTools(): { ok: boolean; error?: string } {
+  const instance = winRef
+  if (!instance || instance.isDestroyed?.()) return { ok: false, error: '悬浮歌词窗口未开启' }
+  try {
+    if (typeof instance.webContents.openDevTools !== 'function') {
+      return { ok: false, error: '当前 ZTools 版本未提供 webContents.openDevTools' }
+    }
+    instance.webContents.openDevTools({ mode: 'detach' })
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err as Error)?.message || String(err) }
+  }
 }
 
 /**
@@ -344,7 +399,9 @@ function signatureOf(payload: DesktopPush): string {
     payload.style.locked,
     payload.style.opacity,
     payload.style.width,
-    payload.style.height
+    payload.style.height,
+    payload.style.lineGap,
+    payload.style.lineOffset
   ].join('|')
 }
 
@@ -372,7 +429,9 @@ function buildPush(rendered: { positionMs: number; known: boolean; status: strin
     locked: settings.desktopLocked,
     opacity: settings.desktopOpacity,
     width: settings.desktopWidth,
-    height: settings.desktopHeight
+    height: settings.desktopHeight,
+    lineGap: settings.desktopLineGap,
+    lineOffset: settings.desktopLineOffset
   }
   const anchor = displayAnchor.value
   if (!anchor) {

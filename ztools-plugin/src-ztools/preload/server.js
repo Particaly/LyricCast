@@ -22,7 +22,22 @@ let core = null
 const subscribers = []
 
 /**
+ * 常见虚拟网卡网段(VMware host-only / Clash fake-ip 等):连接不了真实局域网,
+ * 排序时垫底,降低二维码首位地址不可达的概率(手机端还有同网段优选兜底)。
+ */
+const VIRTUAL_ADDRESS_PATTERNS = [/^192\.168\.56\./, /^192\.168\.232\./, /^198\.18\./]
+
+/** 地址排序权重:普通 192.168/10 段最先,172 段次之,虚拟网卡段垫底,其余最后。 */
+function addressRank(address) {
+  if (VIRTUAL_ADDRESS_PATTERNS.some((pattern) => pattern.test(address))) return 3
+  if (/^192\.168\./.test(address) || /^10\./.test(address)) return 0
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) return 1
+  return 2
+}
+
+/**
  * 枚举本机局域网 IPv4 地址,供 UI 展示给手机端填写。
+ * 结果按 addressRank 排序:真实内网地址在前,虚拟网卡地址垫底。
  * @returns {string[]}
  */
 function localAddresses() {
@@ -33,7 +48,7 @@ function localAddresses() {
       if (info.family === 'IPv4' && !info.internal) result.push(info.address)
     }
   }
-  return result
+  return result.sort((a, b) => addressRank(a) - addressRank(b))
 }
 
 /**

@@ -27,6 +27,10 @@ export interface DesktopState {
     width: number
     /** 胶囊高度(px) */
     height: number
+    /** 行间距(px):当前句与预备句之间的额外垂直间距,负值收紧 */
+    lineGap: number
+    /** 行区垂直偏移(px):歌词块整体上下平移,正值下移 */
+    lineOffset: number
   }
   status: DesktopStatus
   track: { title: string; artist: string } | null
@@ -49,7 +53,7 @@ export interface DesktopState {
 
 export const desktopState = reactive<DesktopState>({
   hovered: false,
-  style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138 },
+  style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138, lineGap: 0, lineOffset: 0 },
   status: 'noplayback',
   track: null,
   lines: [],

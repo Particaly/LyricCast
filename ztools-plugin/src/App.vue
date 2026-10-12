@@ -138,7 +138,9 @@ watch(
     settings.desktopLocked,
     settings.desktopOpacity,
     settings.desktopWidth,
-    settings.desktopHeight
+    settings.desktopHeight,
+    settings.desktopLineGap,
+    settings.desktopLineOffset
   ],
   () => notifyStyleChanged()
 )
