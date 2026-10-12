@@ -1,0 +1,178 @@
+# 手动触发的 Android 端发版流水线:递增版本号 → 提交 → 签名打包 → GitHub Release。
+# APK 以固定资产名 LyricCast.apk 上传,配合 releases/latest/download/LyricCast.apk
+# 这一 GitHub 永久重定向链接,插件设置页的下载二维码无需随版本更新。
+#
+# 签名:优先使用仓库 Secret:
+#   ANDROID_KEYSTORE_BASE64    keystore 文件的 base64(base64 -w0 release.jks)
+#   ANDROID_KEYSTORE_PASSWORD  keystore 口令
+#   ANDROID_KEY_ALIAS          key 别名
+#   ANDROID_KEY_PASSWORD       key 口令(未填时沿用 keystore 口令)
+# 未配置 Secret 时自动生成临时 keystore 并作为 artifact 上传(7 天),
+# 请尽快下载并配置为 Secret——否则各版本签名不一致,手机升级需先卸载重装。
+
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: '版本号递增方式(未填显式版本号时生效)'
+        required: false
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: '显式版本号 x.y.z(填写时忽略递增方式)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: 计算新版本号
+        id: ver
+        env:
+          BUMP: ${{ inputs.bump }}
+          EXPLICIT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          current=$(sed -n 's/^.*versionName "\([^"]*\)".*/\1/p' app/build.gradle | head -n1)
+          code=$(sed -n 's/^.*versionCode \([0-9]\+\).*/\1/p' app/build.gradle | head -n1)
+          [ -n "$current" ] && [ -n "$code" ] || { echo "无法从 app/build.gradle 解析版本号" >&2; exit 1; }
+          if [ -n "$EXPLICIT" ]; then
+            echo "$EXPLICIT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+              || { echo "显式版本号须为 x.y.z 格式: $EXPLICIT" >&2; exit 1; }
+            next="$EXPLICIT"
+          else
+            IFS=. read -r major minor patch <<< "$current"
+            case "$BUMP" in
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              *)     patch=$((patch + 1)) ;;
+            esac
+            next="$major.$minor.$patch"
+          fi
+          {
+            echo "version=$next"
+            echo "version_code=$((code + 1))"
+          } >> "$GITHUB_OUTPUT"
+          echo "版本:$current (code $code) → $next (code $((code + 1)))"
+
+      - name: 写入并提交版本号
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION_CODE: ${{ steps.ver.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          sed -i "s/versionCode [0-9]\+/versionCode $VERSION_CODE/" app/build.gradle
+          sed -i "s/versionName \".*\"/versionName \"$VERSION\"/" app/build.gradle
+          grep -n 'versionCode\|versionName' app/build.gradle
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle
+          git commit -m "chore(release): v$VERSION"
+          git push
+
+      - name: 准备签名 keystore
+        id: keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > signing/release.jks
+            {
+              echo "source=secret"
+              echo "store_pass=$KS_STORE_PASS"
+              echo "alias=$KS_ALIAS"
+              echo "key_pass=${KS_KEY_PASS:-$KS_STORE_PASS}"
+            } >> "$GITHUB_OUTPUT"
+            echo "使用仓库 Secret 中的 keystore"
+          else
+            keytool -genkeypair -v \
+              -keystore signing/release.jks \
+              -alias lyriccast \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass lyriccast-ci -keypass lyriccast-ci \
+              -dname "CN=LyricCast, OU=CI, O=LyricCast, C=CN"
+            {
+              echo "source=generated"
+              echo "store_pass=lyriccast-ci"
+              echo "alias=lyriccast"
+              echo "key_pass=lyriccast-ci"
+            } >> "$GITHUB_OUTPUT"
+            echo "::warning::未配置 ANDROID_KEYSTORE_BASE64,本次使用临时 keystore(artifact: signing-keystore)。请下载后配置为仓库 Secret,保证后续版本签名一致。"
+          fi
+
+      - name: 构建 Release APK
+        env:
+          KS_FILE: ${{ github.workspace }}/signing/release.jks
+          KS_STORE_PASS: ${{ steps.keystore.outputs.store_pass }}
+          KS_ALIAS: ${{ steps.keystore.outputs.alias }}
+          KS_KEY_PASS: ${{ steps.keystore.outputs.key_pass }}
+        run: |
+          ./gradlew assembleRelease \
+            "-PreleaseKeystoreFile=$KS_FILE" \
+            "-PreleaseKeystorePassword=$KS_STORE_PASS" \
+            "-PreleaseKeyAlias=$KS_ALIAS" \
+            "-PreleaseKeyPassword=$KS_KEY_PASS"
+
+      - name: 整理产物
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          cp app/build/outputs/apk/release/android-relay.apk "LyricCast-$VERSION.apk"
+          cp app/build/outputs/apk/release/android-relay.apk LyricCast.apk
+          ls -lh LyricCast*.apk
+
+      - name: 上传临时 keystore(仅自动生成时)
+        if: steps.keystore.outputs.source == 'generated'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-keystore
+          path: signing/release.jks
+          retention-days: 7
+
+      - name: 创建 Release
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" \
+            --title "LyricCast v$VERSION" \
+            --generate-notes \
+            "LyricCast-$VERSION.apk" "LyricCast.apk"
+
+      - name: 写入 Job Summary
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## LyricCast v$VERSION 已发布
+          - 版本化 APK:releases/download/v$VERSION/LyricCast-$VERSION.apk
+          - 固定最新链接(插件下载二维码):https://github.com/${{ github.repository }}/releases/latest/download/LyricCast.apk
+          EOF
