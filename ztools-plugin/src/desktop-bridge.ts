@@ -8,7 +8,7 @@
  *   通过 webContents.executeJavaScript 调用悬浮窗暴露的 window.__applyDesktopState;
  *   ok 状态推送整首行文本 + 平行译文 + 当前行下标,悬浮窗据此自建统一行高的
  *   滚动轨道(行间平滑滑动,与首页歌词同款手感),悬浮窗不感知时间轴;
- * - 悬浮窗顶部工具栏(字号/翻译/锁定/透明度/配色/关闭)与边缘/角落缩放区写入
+ * - 悬浮窗顶部工具栏(字号/翻译/对齐/锁定/透明度/配色/校准/关闭)与边缘/角落缩放区写入
  *   window.__drainDesktopMessages 队列,
  *   主窗口每 100ms 轮询一次消费(同批 resize 只应用最后一条),统一走 updateSettings
  *   持久化(关闭即联动销毁窗口);窗口尺寸用一次 setBounds 原子完成移动+缩放,
@@ -17,7 +17,7 @@
  *   getCursorScreenPoint + 窗口边界判定,进入/离开即推送 hovered 标志驱动;
  * - 窗口位置每 3s 采样持久化,重开时恢复;拖动靠 -webkit-app-region,无 JS 参与。
  */
-import { displayAnchor, lyric, userOffset } from './store'
+import { applyOffset, displayAnchor, lyric, offsetUi, userOffset } from './store'
 import {
   DESKTOP_FONT_RANGE,
   DESKTOP_SIZE_RANGE,
@@ -61,6 +61,8 @@ export interface DesktopPush {
     lineGap: number
     /** 行区垂直偏移(px):歌词块整体上下平移,正值下移 */
     lineOffset: number
+    /** 自定义 CSS:原始样式,悬浮窗注入 <style> 覆盖内置外观 */
+    customCss: string
   }
   status: 'ok' | 'loading' | 'nolyrics' | 'noplayback' | 'offline'
   track: { title: string; artist: string } | null
@@ -78,6 +80,10 @@ export interface DesktopPush {
    * 悬浮窗据此区分「轨道内容重建」与「行推进」,前者直接落位不播放滚动动画
    */
   linesVersion: number
+  /** 当前生效的手动校准偏移(ms,正值 = 歌词提前,已计入 activeIndex):校准面板展示用 */
+  offsetMs: number
+  /** 校准偏移的记忆维度(记住本曲/记住此应用):工具栏调整由主窗口写入此维度 */
+  offsetScope: 'track' | 'app'
   /** 进度锚点:悬浮窗按 speed 本地插值,避免高频推送 */
   progress: {
     atMs: number
@@ -392,6 +398,8 @@ function signatureOf(payload: DesktopPush): string {
     payload.track?.title ?? '',
     payload.activeIndex,
     payload.linesVersion,
+    payload.offsetMs,
+    payload.offsetScope,
     payload.style.fontSize,
     payload.style.theme,
     payload.style.align,
@@ -401,7 +409,8 @@ function signatureOf(payload: DesktopPush): string {
     payload.style.width,
     payload.style.height,
     payload.style.lineGap,
-    payload.style.lineOffset
+    payload.style.lineOffset,
+    payload.style.customCss
   ].join('|')
 }
 
@@ -431,12 +440,15 @@ function buildPush(rendered: { positionMs: number; known: boolean; status: strin
     width: settings.desktopWidth,
     height: settings.desktopHeight,
     lineGap: settings.desktopLineGap,
-    lineOffset: settings.desktopLineOffset
+    lineOffset: settings.desktopLineOffset,
+    customCss: settings.desktopCustomCss
   }
   const anchor = displayAnchor.value
+  // 校准展示信息与具体状态无关(无播放也要在面板里可见),统一并入每条返回
+  const calibration = { offsetMs: userOffset.value, offsetScope: offsetUi.scope }
   if (!anchor) {
     return {
-      hovered, style, status: 'noplayback', track: null,
+      hovered, style, ...calibration, status: 'noplayback', track: null,
       lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
     }
   }
@@ -444,7 +456,7 @@ function buildPush(rendered: { positionMs: number; known: boolean; status: strin
   const track = { title: state.track.title || '', artist: state.track.artist || '' }
   if (rendered.status === 'disconnected') {
     return {
-      hovered, style, status: 'offline', track,
+      hovered, style, ...calibration, status: 'offline', track,
       lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
     }
   }
@@ -456,13 +468,13 @@ function buildPush(rendered: { positionMs: number; known: boolean; status: strin
       : -1
   if (lyric.loading) {
     return {
-      hovered, style, status: 'loading', track,
+      hovered, style, ...calibration, status: 'loading', track,
       lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
     }
   }
   if (activeIndex < 0 && lyric.lines.length === 0) {
     return {
-      hovered, style, status: 'nolyrics', track,
+      hovered, style, ...calibration, status: 'nolyrics', track,
       lines: [], translations: [], activeIndex: -1, linesVersion, progress: null
     }
   }
@@ -479,6 +491,7 @@ function buildPush(rendered: { positionMs: number; known: boolean; status: strin
   return {
     hovered,
     style,
+    ...calibration,
     status: 'ok',
     track,
     lines,
@@ -544,7 +557,7 @@ function stopTimers(): void {
   timers = []
 }
 
-/** 消费悬浮窗工具栏消息(字号/翻译/对齐/锁定/透明度/尺寸/配色/关闭),统一落回 settings。
+/** 消费悬浮窗工具栏消息(字号/翻译/对齐/锁定/透明度/尺寸/配色/校准/关闭),统一落回 settings 或 store。
  * 同一批里可能堆了多条 resize(子窗口 ~33ms 节流入队,本函数 100ms 轮询一次):
  * 中间尺寸没有意义,只应用最后一条,避免 settings 连写和窗口连续缩放 */
 async function drainMessages(): Promise<void> {
@@ -575,6 +588,11 @@ async function drainMessages(): Promise<void> {
         updateSettings({ desktopAlign: settings.desktopAlign === 'center' ? 'left' : 'center' })
       } else if (message?.type === 'lock') {
         updateSettings({ desktopLocked: !settings.desktopLocked })
+      } else if (message?.type === 'offset') {
+        // 校准:复用设置页的 applyOffset(按当前记忆维度写入 OffsetStore 并持久化,
+        // delta 0 = 复位本曲记录),立即重推让校准面板即时读到新值,不等 250ms 节拍
+        applyOffset(message.delta ?? 0)
+        syncDesktopLyrics(undefined, true)
       } else if (message?.type === 'opacity') {
         // sanitize 会把越界/非法值裁剪回 0~100
         updateSettings({ desktopOpacity: message.value as number })

@@ -66,6 +66,10 @@ watch(
 
 const hasSynced = computed(() => lyric.lines.length > 0)
 
+/** 单行纯文本判定:纯音乐等占位歌词(如「纯音乐,请欣赏」)整首只有一行,
+ * 按多行排进顶部左对齐的滚动容器会孤零零顶在左上角,改为视口居中展示 */
+const plainIsSingleLine = computed(() => !!lyric.plain && !lyric.plain.includes('\n'))
+
 /** 当前行翻译(settings.translation 开启且有对应译文) */
 const activeTranslation = computed(() => {
   if (!settings.translation) return ''
@@ -101,8 +105,13 @@ const activeTranslation = computed(() => {
       </div>
     </template>
 
-    <!-- 纯文本歌词(无时间轴) -->
-    <div class="plain" v-else-if="lyric.plain" :style="{ fontSize: fontSize + 'px' }">{{ lyric.plain }}</div>
+    <!-- 纯文本歌词(无时间轴);单行(如纯音乐的「纯音乐,请欣赏」占位)居中展示 -->
+    <div
+      class="plain"
+      :class="{ single: plainIsSingleLine }"
+      v-else-if="lyric.plain"
+      :style="{ fontSize: fontSize + 'px' }"
+    >{{ lyric.plain }}</div>
 
     <!-- 降级态占位 -->
     <div class="placeholder" v-else-if="lyric.loading">
@@ -186,6 +195,14 @@ const activeTranslation = computed(() => {
   padding: 4px 6px;
   box-sizing: border-box;
   color: rgba(255, 255, 255, 0.78);
+}
+
+/* 单行纯文本(纯音乐占位等):整块在视口内水平垂直居中,观感与占位态一致 */
+.plain.single {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .placeholder {

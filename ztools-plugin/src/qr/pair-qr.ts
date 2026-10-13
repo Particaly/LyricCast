@@ -1,5 +1,5 @@
 /**
- * 配对二维码 payload 的构建(docs/protocol.md §7)。
+ * 配对二维码 payload 的构建。
  *
  * 格式:androidrelay://pair?v=1&port=<port>&ip=<ip1>&ip=<ip2>&token=<token>
  * - PC 端(本函数)负责生成,Android 端 PairingQr.parse 负责解析,两侧字段顺序不敏感;

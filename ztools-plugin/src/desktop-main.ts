@@ -20,7 +20,7 @@ if (import.meta.env.DEV) {
     if (desktopState.status === 'noplayback' && desktopState.lines.length === 0) {
       applyDesktopState({
         hovered: false,
-        style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138, lineGap: 0, lineOffset: 0 },
+        style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138, lineGap: 0, lineOffset: 0, customCss: '' },
         status: 'ok',
         track: { title: '夜色温柔 (Demo)', artist: '虚拟歌手' },
         lines: [
@@ -39,6 +39,8 @@ if (import.meta.env.DEV) {
         ],
         activeIndex: 1,
         linesVersion: 1,
+        offsetMs: 0,
+        offsetScope: 'track',
         progress: { atMs: Date.now(), positionMs: 34_000, speed: 1, playing: true, durationMs: 96_000 }
       })
     }

@@ -3,7 +3,13 @@
  * desktopRowMetrics 是悬浮窗渲染公式的同源副本,胶囊自动加高依赖它,公式改动须同步。
  */
 import { describe, expect, it } from 'vitest'
-import { DESKTOP_LINE_GAP_RANGE, desktopRowMetrics, settings, updateSettings } from './settings'
+import {
+  DESKTOP_CUSTOM_CSS_MAX_LENGTH,
+  DESKTOP_LINE_GAP_RANGE,
+  desktopRowMetrics,
+  settings,
+  updateSettings
+} from './settings'
 
 describe('desktopRowMetrics', () => {
   it('行高 = 文本盒高 + 译文槽(开翻译时)+ 行间距', () => {
@@ -50,5 +56,16 @@ describe('desktopLineOffset sanitize', () => {
     expect(settings.desktopLineOffset).toBe(0)
     updateSettings({ desktopLineOffset: '10' as unknown as number })
     expect(settings.desktopLineOffset).toBe(0)
+  })
+})
+
+describe('desktopCustomCss sanitize', () => {
+  it('字符串原样保留,超长截断到上限,非法类型回落空串', () => {
+    updateSettings({ desktopCustomCss: '.pill { border-radius: 20px; }' })
+    expect(settings.desktopCustomCss).toBe('.pill { border-radius: 20px; }')
+    updateSettings({ desktopCustomCss: 'a'.repeat(DESKTOP_CUSTOM_CSS_MAX_LENGTH + 100) })
+    expect(settings.desktopCustomCss.length).toBe(DESKTOP_CUSTOM_CSS_MAX_LENGTH)
+    updateSettings({ desktopCustomCss: 42 as unknown as string })
+    expect(settings.desktopCustomCss).toBe('')
   })
 })

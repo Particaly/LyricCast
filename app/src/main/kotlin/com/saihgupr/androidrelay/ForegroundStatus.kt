@@ -21,6 +21,8 @@ object ForegroundStatus {
     ): String = when {
         !lanEnabled -> "未配对 · LAN 推送未开启"
         statusText.startsWith("认证失败") -> statusText
+        // 退出落地瞬间(通知随服务自停移除)可能以"已退出"状态构建一次通知
+        statusText.startsWith("已退出") -> "已退出 · 后台运行已停止"
         !listenerAccessGranted -> "待授权 · 需开启通知使用权"
         statusText.startsWith("未启用") -> "已保存 · 等待推送服务启动"
         connected -> if (statusText == "已连接") "已连接 · 正在同步播放信息" else "已连接 · $statusText"

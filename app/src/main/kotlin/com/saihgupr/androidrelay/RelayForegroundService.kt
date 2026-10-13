@@ -54,9 +54,18 @@ class RelayForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            Log.i(TAG, "Stop requested via notification action")
+            Log.i(TAG, "Exit requested via notification action")
+            // 通知栏「退出」= 完整退出:落退出标记、经监听服务停掉 LAN 通道,
+            // 随后自停移除常驻通知;恢复需回应用内点「重新启动推送」或重新保存配置
+            AppExit.performExit(this)
             // 先满足 startForegroundService 的 5 秒规则(防御经 startForegroundService 派发的 STOP),再自停
             startInForeground(currentNotification())
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // START_STICKY 被系统重建(进程曾被杀)时不得无视退出标记重新前台化
+        if (AppExit.isExited(this)) {
+            Log.i(TAG, "Skip restart: user exited")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -105,7 +114,7 @@ class RelayForegroundService : Service() {
         return buildNotification(connected, text)
     }
 
-    /** 组装通知:文案由 [ForegroundStatus] 纯映射;点击回主界面;带"停止"动作。 */
+    /** 组装通知:文案由 [ForegroundStatus] 纯映射;点击回主界面;带「退出」动作(完整退出)。 */
     private fun buildNotification(connected: Boolean, statusText: String): Notification {
         val lanEnabled = LanSettings.isEnabled(this)
         val contentIntent = PendingIntent.getActivity(

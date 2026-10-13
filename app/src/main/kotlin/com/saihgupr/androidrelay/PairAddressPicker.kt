@@ -6,7 +6,7 @@ import java.net.NetworkInterface
 /**
  * 扫码配对的地址挑选(纯 JVM 实现,JVM 单测可直接覆盖)。
  *
- * 配对二维码按 PC 的网卡枚举顺序编入全部局域网 IPv4(docs/protocol.md §7),
+ * 配对二维码按 PC 的网卡枚举顺序编入全部局域网 IPv4,
  * Windows 上虚拟网卡(VMware/WSL/Clash TUN 等)常常排在真实网卡前面,
  * 直接取第一个会填入连不上的地址。这里按"与手机同一 /24 网段优先"重选:
  * - 手机连着同一 Wi-Fi 时几乎总能命中电脑的真实地址;

@@ -10,37 +10,37 @@ import android.os.Build
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.util.Log
-import org.json.JSONObject
 
 /**
- * 媒体会话监听 + LAN/MQTT 推送的宿主服务。
+ * 媒体会话监听 + LAN 推送的宿主服务。
  *
  * 两条实例来源:系统在通知使用权授予后绑定(媒体会话数据的唯一合法来源);
  * MainActivity 在保存/扫码配对后显式 startService 拉起 —— 服务未被系统绑定
  * (或 ROM 忽略 rebind 请求)时,requestRebind 静默无效,显式拉起能让
  * LAN 连接立即建立。两路共用同一实例:onCreate 创建管理器但不启动,
  * 由先到达的 onStartCommand(显式)或 onListenerConnected(系统)启动。
+ *
+ * 完整退出:用户退出后([AppExit] 标记落盘),系统绑定仍可能把本服务拉起,
+ * 但 onCreate/onStartCommand/onListenerConnected 全部按标记关门 —— 不建 LAN、
+ * 不拉前台服务,服务只作为被系统绑定的空壳存在;
+ * 「重新启动推送」等显式动作清除标记后自然恢复。
  */
 class MediaSessionListenerService : NotificationListenerService(), MediaSessionManager.OnActiveSessionsChangedListener {
 
     private lateinit var mediaSessionManager: MediaSessionManager
     private val controllers = mutableMapOf<String, MediaController>()
     private val callbacks = mutableMapOf<String, MediaController.Callback>()
-    private val lastPublishedPayloads = mutableMapOf<String, String>()
     // 每个包名最近一次收到媒体事件的 SystemClock.elapsedRealtime(),用作"最近活跃会话"排序依据
     private val lastEventAt = mutableMapOf<String, Long>()
     // 应用显示名缓存,避免每次回调都查 PackageManager
     private val appLabels = mutableMapOf<String, String>()
-    private lateinit var mqttClient: MqttRelay
-    // LAN 推送通道(独立于 MQTT 的开关、缓存与连接管理)
+    // LAN 推送通道(开关、缓存与连接管理)
     private var lanPushManager: LanPushManager? = null
 
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "Service Created")
         mediaSessionManager = getSystemService(MEDIA_SESSION_SERVICE) as MediaSessionManager
-        mqttClient = MqttRelay(this)
-        mqttClient.connect()
         // 只创建不启动:启动时点由先到达的 onStartCommand / onListenerConnected 决定,
         // 避免显式拉起路径(两者都会到)重复触发连接重建
         lanPushManager = LanPushManager(this)
@@ -50,8 +50,15 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
      * 显式 startService 的落地(MainActivity 保存/配对后的双保险之一):
      * 按最新持久化配置启动 LAN 通道(等效"保存并重连",配置变更即时生效),
      * 开关关闭时停通道。系统绑定不会走到这里;重复 start 幂等(旧连接被重建)。
+     * 两个分支之外,[ACTION_EXIT] 由 [AppExit.performExit] 派发:停掉两条通道后
+     * 状态置"已退出";已处于退出态时收到的任何 start 也一律保持关闭。
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_EXIT || AppExit.isExited(this)) {
+            Log.i(TAG, "Keep channels stopped (exit requested=${intent?.action == ACTION_EXIT})")
+            stopChannels()
+            return START_NOT_STICKY
+        }
         Log.i(TAG, "Service started explicitly (lanEnabled=${LanSettings.isEnabled(this)})")
         if (LanSettings.isEnabled(this)) {
             lanPushManager?.start()
@@ -61,12 +68,22 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         return START_STICKY
     }
 
+    /**
+     * 停掉 LAN 推送通道并把状态置为"已退出":
+     * LAN 侧由 [LanPushManager.stop] 断连接、停定时器并释放保活锁。仅退出路径使用。
+     */
+    private fun stopChannels() {
+        lanPushManager?.stop()
+        LanConnectionState.update(false, "已退出")
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         Log.i(TAG, "Listener Connected")
         // 系统绑定 joining 已被显式拉起的实例时不重复 start(通道已在运行);
-        // 纯系统绑定路径(未显式 start 过)在此启动,媒体回调随即可用
-        if (lanPushManager?.isRunning != true) {
+        // 纯系统绑定路径(未显式 start 过)在此启动,媒体回调随即可用。
+        // 已完整退出时不启动(LanPushManager.start 内亦有同款兜底)
+        if (!AppExit.isExited(this) && lanPushManager?.isRunning != true) {
             lanPushManager?.start()
         }
         val componentName = ComponentName(this, MediaSessionListenerService::class.java)
@@ -81,7 +98,7 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
      * 任何失败都只降级为"仅 Listener 工作",warn 日志,绝不崩溃。
      */
     private fun tryStartForegroundService() {
-        if (!LanSettings.isEnabled(this)) return
+        if (AppExit.isExited(this) || !LanSettings.isEnabled(this)) return
         try {
             // startForegroundService 允许后台拉起,但 Android 12+ 起受 FGS 启动限制,
             // 失败即降级(onListenerConnected 多数场景发生在前台/解锁后,通常可成功)
@@ -118,7 +135,6 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
             val (pkg, controller) = iterator.next()
             if (pkg !in activePackages) {
                 unregisterQuietly(pkg, controller)
-                lastPublishedPayloads.remove(pkg)
                 lastEventAt.remove(pkg)
                 iterator.remove()
             }
@@ -154,14 +170,12 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
     }
 
     /**
-     * 会话被应用主动销毁时的清理:仅注销回调并移除内部状态。
-     * MQTT 保持既有行为(销毁不触发发布),避免影响现有 Home Assistant 语义。
+     * 会话被应用主动销毁时的清理:仅注销回调并移除内部状态,不触发任何推送。
      */
     private fun cleanupSession(pkg: String, controller: MediaController) {
         unregisterQuietly(pkg, controller)
         callbacks.remove(pkg)
         controllers.remove(pkg)
-        lastPublishedPayloads.remove(pkg)
         lastEventAt.remove(pkg)
         logSelectedLanSession()
     }
@@ -198,7 +212,6 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         val pkg = controller.packageName
         lastEventAt[pkg] = SystemClock.elapsedRealtime()
 
-        // ---- 完整媒体信息(LAN 通道数据源;MQTT 行为保持不变)----
         val info = MediaMetadataReader.read(controller, appLabel(pkg))
         if (info != null) {
             Log.d(TAG, "MediaInfo[$pkg]: $info")
@@ -209,42 +222,6 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         if (MediaDiagnostics.enabled(applicationContext)) {
             MediaDiagnostics.logSession(controller)
         }
-
-        // ---- 原有 MQTT 上报逻辑(保持原字段与去重行为,勿改)----
-        val playbackState = controller.playbackState
-        val metadata = controller.metadata
-
-        val stateStr = when (playbackState?.state) {
-            PlaybackState.STATE_PLAYING -> "playing"
-            PlaybackState.STATE_PAUSED -> "paused"
-            PlaybackState.STATE_BUFFERING -> "buffering"
-            else -> "idle"
-        }
-
-        val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""
-        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
-        val durationMs = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-        val durationSec = if (durationMs > 0) durationMs / 1000 else 0L
-        val app = controller.packageName
-
-        val payload = JSONObject().apply {
-            put("state", stateStr)
-            put("title", title)
-            put("artist", artist)
-            put("app", app)
-            put("duration", durationSec)
-        }.toString()
-
-        // Cache the payload per-app to prevent redundant MQTT publishes on position updates.
-        // `onPlaybackStateChanged` fires frequently for progress updates, which
-        // causes unnecessary network I/O if the state/title/artist haven't actually changed.
-        if (payload == lastPublishedPayloads[app]) {
-            return
-        }
-        lastPublishedPayloads[app] = payload
-
-        Log.d(TAG, "Reporting: $payload")
-        mqttClient.publish(null, payload)
     }
 
     /**
@@ -267,10 +244,12 @@ class MediaSessionListenerService : NotificationListenerService(), MediaSessionM
         mediaSessionManager.removeOnActiveSessionsChangedListener(this)
         lanPushManager?.shutdown()
         lanPushManager = null
-        mqttClient.disconnect()
     }
 
     companion object {
         private const val TAG = "RelayService"
+
+        /** 完整退出的落地 intent action,由 [AppExit.performExit] 派发。 */
+        const val ACTION_EXIT = "com.saihgupr.androidrelay.action.EXIT_CHANNELS"
     }
 }

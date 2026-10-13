@@ -24,7 +24,7 @@ const BASE = 'https://lyrics-api.boidu.dev'
 const TIMEOUT_MS = 5_000
 
 const HEADERS = {
-  'User-Agent': 'lyriccast-ztools-plugin/0.2 (github.com/saihgupr/android_relay)'
+  'User-Agent': 'lyriccast-ztools-plugin/0.2 (github.com/Particaly/LyricCast)'
 }
 
 /** 解析 TTML 时间属性:"18.893"(秒.毫秒)或 "0:18.893"/"mm:ss.mmm" → 毫秒;失败 NaN */

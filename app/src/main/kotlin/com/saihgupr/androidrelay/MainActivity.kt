@@ -31,6 +31,8 @@ import org.json.JSONObject
  * 状态来源:LanConnectionState(onResume 注册 / onPause 注销),英雄卡、顶栏胶囊、
  * LAN 卡标题圆点与"正在推送"卡都由它驱动;通知监听权限引导卡按系统设置条件显示。
  * 「后台保活」卡(参考 Gotify)提供四项自检与分 ROM 引导,逻辑在 KeepAliveGuide。
+ * 页底「退出」入口走 AppExit 完整退出:停全部通道并落盘退出标记,自动补拉全部关门,
+ * 恢复只能通过「重新启动推送」或重新保存配置这类显式动作。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -72,9 +74,6 @@ class MainActivity : AppCompatActivity() {
     private var lanTesting = false
     private var lanTestTimeoutPending = false
 
-    // MQTT 测试连接进行中标记(成功后的例行状态播报不再覆盖结果)
-    private var mqttTesting = false
-
     // LAN 连接状态与曲目摘要的监听句柄(onResume 注册 / onPause 注销)
     private var lanStateListener: ((Boolean, String) -> Unit)? = null
     private var trackListener: ((LanConnectionState.NowPlaying?) -> Unit)? = null
@@ -111,29 +110,6 @@ class MainActivity : AppCompatActivity() {
             getString(R.string.footer_version, currentVersionName())
 
         val permissionButton = findViewById<Button>(R.id.permission_button)
-        val mqttBrokerEdit = findViewById<android.widget.EditText>(R.id.mqtt_broker_edit)
-        val mqttTopicEdit = findViewById<android.widget.EditText>(R.id.mqtt_topic_edit)
-        val mqttAuthSwitch = findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.mqtt_auth_switch)
-        val mqttAuthContainer = findViewById<android.widget.LinearLayout>(R.id.mqtt_auth_container)
-        val mqttUsernameEdit = findViewById<android.widget.EditText>(R.id.mqtt_username_edit)
-        val mqttPasswordEdit = findViewById<android.widget.EditText>(R.id.mqtt_password_edit)
-        val saveButton = findViewById<Button>(R.id.save_config_button)
-        val testButton = findViewById<Button>(R.id.test_mqtt_button)
-
-        // Load existing config
-        val prefs = getSharedPreferences("mqtt_config", MODE_PRIVATE)
-        mqttBrokerEdit.setText(prefs.getString("broker_ip", "192.168.1.199"))
-        mqttTopicEdit.setText(prefs.getString("topic", "android_tv/playback_state"))
-
-        val useAuth = prefs.getBoolean("use_auth", false)
-        mqttAuthSwitch.isChecked = useAuth
-        mqttAuthContainer.visibility = if (useAuth) View.VISIBLE else View.GONE
-        mqttUsernameEdit.setText(prefs.getString("username", ""))
-        mqttPasswordEdit.setText(prefs.getString("password", ""))
-
-        mqttAuthSwitch.setOnCheckedChangeListener { _, isChecked ->
-            mqttAuthContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
-        }
 
         permissionButton.setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -145,39 +121,21 @@ class MainActivity : AppCompatActivity() {
             adb.visibility = if (adb.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
 
-        saveButton.setOnClickListener {
-            val ip = mqttBrokerEdit.text.toString()
-            val topic = mqttTopicEdit.text.toString()
-            val auth = mqttAuthSwitch.isChecked
-            val user = mqttUsernameEdit.text.toString()
-            val pass = mqttPasswordEdit.text.toString()
-
-            prefs.edit()
-                .putString("broker_ip", ip)
-                .putString("topic", topic)
-                .putBoolean("use_auth", auth)
-                .putString("username", user)
-                .putString("password", pass)
-                .apply()
-
-        // Restart service to pick up changes
-        restartListenerService()
-        Toast.makeText(this, R.string.mqtt_saved_toast, Toast.LENGTH_SHORT).show()
-        }
-
-        testButton.setOnClickListener { runMqttTest() }
-
         setupLanSection()
         setupKeepAliveSection()
+        setupExitSection()
         setupCollapsibleSections()
         updateStatus()
         // 应用启动时若已配对(LAN 开关打开且有地址),尝试拉起前台保活服务
+        // (完整退出态下此调用为空操作,退出后重开应用不会再自动后台运行)
         maybeStartForegroundService()
     }
 
     override fun onResume() {
         super.onResume()
         updateStatus()
+        // 退出/恢复按钮的文案跟随持久化标记(后台期间可能经通知栏「退出」变过状态)
+        refreshExitSection()
         // 配置已启用但服务侧仍停在"未启用"时补发一次 rebind(从系统设置授权返回、
         // 或上次保存后的 rebind 被系统忽略的场景,见 ensureListenerServiceRestarted)
         ensureListenerServiceRestarted()
@@ -223,7 +181,10 @@ class MainActivity : AppCompatActivity() {
      * 通知使用权",已配置但开关关闭 → "同步已关闭",未配置 → "尚未配对"。
      */
     private fun applyConnectionState(connected: Boolean, statusText: String) {
-        val status = ConnectionUi.from(connected, statusText, NotificationAccess.granted(this))
+        // 退出态以持久化标记为准(进程重启后 LanConnectionState 是空白快照,
+        // 不能依赖服务写入的"已退出"文本),直接覆盖连接状态展示
+        val status = if (AppExit.isExited(this)) ConnectionUiStatus.EXITED
+        else ConnectionUi.from(connected, statusText, NotificationAccess.granted(this))
         lastStatus = status
         val color = statusColor(status)
 
@@ -238,6 +199,7 @@ class MainActivity : AppCompatActivity() {
 
         val hostConfigured = LanSettings.host(this).isNotBlank()
         findViewById<TextView>(R.id.hero_status_text).text = when (status) {
+            ConnectionUiStatus.EXITED -> getString(R.string.status_exited)
             ConnectionUiStatus.DISABLED ->
                 getString(
                     if (hostConfigured) R.string.status_disabled else R.string.status_not_paired
@@ -247,6 +209,7 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<TextView>(R.id.status_capsule_text).apply {
             text = when (status) {
+                ConnectionUiStatus.EXITED -> getString(R.string.status_capsule_exited)
                 ConnectionUiStatus.DISABLED ->
                     getString(
                         if (hostConfigured) R.string.status_disabled else R.string.status_capsule_unpaired
@@ -280,6 +243,7 @@ class MainActivity : AppCompatActivity() {
         val host = LanSettings.host(this)
         val targetText = findViewById<TextView>(R.id.hero_target_text)
         targetText.text = when {
+            lastStatus == ConnectionUiStatus.EXITED -> getString(R.string.status_exited_hint)
             lastStatus == ConnectionUiStatus.CONNECTED && host.isNotBlank() ->
                 getString(R.string.lan_target_text, host, LanSettings.port(this))
             host.isBlank() -> getString(R.string.status_not_paired_hint)
@@ -326,7 +290,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 连接状态 → 语义色(绿=已连接,橙=连接/重连中/待授权,红=认证失败,灰=未启用)。
+     * 连接状态 → 语义色(绿=已连接,橙=连接/重连中/待授权,红=认证失败,灰=未启用/已退出)。
      */
     private fun statusColor(status: ConnectionUiStatus): Int = getColor(
         when (status) {
@@ -334,7 +298,7 @@ class MainActivity : AppCompatActivity() {
             ConnectionUiStatus.CONNECTING, ConnectionUiStatus.RECONNECTING,
             ConnectionUiStatus.NEEDS_ACCESS -> R.color.status_warning
             ConnectionUiStatus.AUTH_FAILED -> R.color.status_error
-            ConnectionUiStatus.DISABLED -> R.color.text_hint
+            ConnectionUiStatus.DISABLED, ConnectionUiStatus.EXITED -> R.color.text_hint
         }
     )
 
@@ -361,8 +325,8 @@ class MainActivity : AppCompatActivity() {
     // ==================== 折叠卡 ====================
 
     /**
-     * 组装两张折叠设置卡:点击标题行切换 body 可见性并旋转箭头。
-     * 首次使用(未配置电脑地址)时自动展开 LAN 卡降低上手成本;MQTT 始终默认收起。
+     * 组装折叠设置卡:点击标题行切换 body 可见性并旋转箭头。
+     * 首次使用(未配置电脑地址)时自动展开 LAN 卡降低上手成本。
      */
     private fun setupCollapsibleSections() {
         lanBody = findViewById(R.id.lan_body)
@@ -370,12 +334,6 @@ class MainActivity : AppCompatActivity() {
         bindCollapsible(
             findViewById(R.id.lan_header), lanBody, lanChevron,
             expanded = LanSettings.host(this).isBlank()
-        )
-        bindCollapsible(
-            findViewById(R.id.mqtt_header),
-            findViewById(R.id.mqtt_body),
-            findViewById(R.id.mqtt_chevron),
-            expanded = false
         )
     }
 
@@ -396,12 +354,11 @@ class MainActivity : AppCompatActivity() {
         lanChevron.animate().rotation(90f).setDuration(150).start()
     }
 
-    // ==================== LAN Push 设置区 ====================
+    // ==================== 局域网推送设置区 ====================
 
     /**
      * 组装 LAN 推送卡:读取配置、重新生成 Token、保存重连、一次性连接测试。
-     * LAN 设置独立存放("lan_config"),保存后通过 requestRebind 重启服务生效,
-     * 与 MQTT 的"保存并重启服务"互不干扰。
+     * LAN 设置独立存放("lan_config"),保存后通过 requestRebind 重启服务生效。
      */
     private fun setupLanSection() {
         val lanPrefs = LanSettings.prefs(this)
@@ -464,6 +421,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * 读取 LAN 表单并持久化,随后 requestRebind 重启监听服务使配置立即生效
      * (保存按钮与扫码导入共用;服务 onCreate 会按开关建立/不建立连接)。
+     * 「保存并重连」是显式的恢复动作:同时清除完整退出标记。
      */
     private fun saveLanSettings() {
         val lanPrefs = LanSettings.prefs(this)
@@ -488,6 +446,10 @@ class MainActivity : AppCompatActivity() {
             .putBoolean(LanSettings.KEY_DIAGNOSTIC_LOG, diagnosticSwitch.isChecked)
             .putString("lan_app_blacklist", blacklistEdit.text.toString().trim())
             .apply()
+
+        // 「保存并重连」属显式恢复动作:清除完整退出标记,随后的重启服务才不会被关门
+        AppExit.setExited(this, false)
+        refreshExitSection()
 
         // 重启监听服务,使新配置立即生效;4 秒后复查一次,兜底系统忽略/延迟 rebind
         restartListenerService()
@@ -536,6 +498,8 @@ class MainActivity : AppCompatActivity() {
      * 再发 rebind 反而会打断正常连接。
      */
     private fun ensureListenerServiceRestarted() {
+        // 完整退出态下不补发 rebind,保持"退出不再启动"语义
+        if (AppExit.isExited(this)) return
         if (!LanSettings.isEnabled(this) || LanSettings.host(this).isBlank()) return
         if (!NotificationAccess.granted(this)) return
         if (!LanConnectionState.snapshot().second.startsWith("未启用")) return
@@ -630,47 +594,12 @@ class MainActivity : AppCompatActivity() {
         resultText.setTextColor(getColor(if (isError) R.color.status_error else R.color.status_ok))
     }
 
-    // ==================== MQTT 测试 ====================
-
-    /**
-     * 一次性 MQTT 测试:按当前保存的配置连接 Broker;成功判定走 [MqttRelay.MqttStatusListener
-     * onConnected] 回调(Paho connectComplete),成功后发一条测试消息并停止接收后续播报。
-     */
-    private fun runMqttTest() {
-        if (mqttTesting) return
-        val testResultText = findViewById<TextView>(R.id.test_result_text)
-
-        mqttTesting = true
-        val mqtt = MqttRelay(this)
-        testResultText.text = getString(R.string.mqtt_test_init)
-        testResultText.setTextColor(getColor(R.color.text_secondary))
-
-        mqtt.connect(object : MqttRelay.MqttStatusListener {
-            override fun onStatusUpdate(message: String, isError: Boolean) {
-                runOnUiThread {
-                    if (!mqttTesting) return@runOnUiThread // 成功后的例行播报不覆盖绿色结果
-                    testResultText.text = message
-                    if (isError) {
-                        testResultText.setTextColor(getColor(R.color.status_error))
-                        mqttTesting = false
-                    }
-                }
-            }
-
-            override fun onConnected() {
-                runOnUiThread {
-                    testResultText.setTextColor(getColor(R.color.status_ok))
-                    mqtt.publish(null, "{\"status\": \"test\", \"message\": \"Hello from Relay UI\"}")
-                    mqttTesting = false
-                }
-            }
-        })
-    }
-
     // ==================== 前台服务与权限引导 ====================
 
-    /** LAN 已启用且配置了地址时,前台启动保活服务;失败仅提示,不阻塞设置流程。 */
+    /** LAN 已启用且配置了地址时,前台启动保活服务;失败仅提示,不阻塞设置流程。
+     *  完整退出态下为空操作(退出后重开应用、回到前台都不会再自动后台运行)。 */
     private fun maybeStartForegroundService() {
+        if (AppExit.isExited(this)) return
         if (!LanSettings.isEnabled(this) || LanSettings.host(this).isBlank()) return
         try {
             androidx.core.content.ContextCompat.startForegroundService(
@@ -876,6 +805,65 @@ class MainActivity : AppCompatActivity() {
                 showKeepAliveStep(steps, index + 1)
             }
             .show()
+    }
+
+    // ==================== 完整退出与恢复 ====================
+
+    /**
+     * 页底退出入口:未退出时点击弹确认后执行完整退出([AppExit.performExit]);
+     * 已退出时按钮变为「重新启动推送」,点击清除退出标记并按当前配置恢复服务。
+     */
+    private fun setupExitSection() {
+        findViewById<Button>(R.id.exit_button).setOnClickListener { onExitButtonClicked() }
+        refreshExitSection()
+    }
+
+    /** 退出/恢复按钮与说明行的文案切换(进入页面、状态变化、恢复后都会调用)。 */
+    private fun refreshExitSection() {
+        val exited = AppExit.isExited(this)
+        findViewById<Button>(R.id.exit_button).setText(
+            if (exited) R.string.exit_resume_button else R.string.exit_button
+        )
+        findViewById<TextView>(R.id.exit_hint).setText(
+            if (exited) R.string.exit_hint_exited else R.string.exit_hint
+        )
+    }
+
+    private fun onExitButtonClicked() {
+        if (AppExit.isExited(this)) {
+            resumeFromExit()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.exit_confirm_title)
+            .setMessage(R.string.exit_confirm_message)
+            .setPositiveButton(R.string.exit_confirm_ok) { _, _ -> performExitFromUi() }
+            .setNegativeButton(R.string.exit_confirm_cancel, null)
+            .show()
+    }
+
+    /**
+     * 确认后的退出落地:停掉全部通道并落盘退出标记,随后立即把界面刷到"已退出"
+     * 状态(不依赖服务 ACTION_EXIT 的异步回报,防止 startService 失败时界面滞留旧状态)。
+     */
+    private fun performExitFromUi() {
+        AppExit.performExit(this)
+        refreshExitSection()
+        applyConnectionState(false, getString(R.string.status_exited))
+        Toast.makeText(this, R.string.exit_done_toast, Toast.LENGTH_LONG).show()
+    }
+
+    /**
+     * 从退出态恢复:清标记后按当前配置恢复服务。不走 [ensureListenerServiceRestarted] ——
+     * 退出态下状态文本是"已退出"而非"未启用",过不了它的补发条件;这里显式重启,
+     * 与"保存并重连"同一条路径。界面随服务重启后的状态回报自然刷新。
+     */
+    private fun resumeFromExit() {
+        AppExit.setExited(this, false)
+        refreshExitSection()
+        restartListenerService()
+        maybeStartForegroundService()
+        Toast.makeText(this, R.string.exit_resume_toast, Toast.LENGTH_SHORT).show()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

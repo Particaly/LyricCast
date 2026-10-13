@@ -4,7 +4,7 @@ package com.saihgupr.androidrelay
  * 多会话选择器:系统 getActiveSessions 可能同时返回多个 App 的媒体会话
  * (音乐 + 视频 + 播客……),LAN 推送同一时刻只应跟随一个"活跃"会话。
  *
- * 选择规则(与 docs/protocol.md 约定一致):
+ * 选择规则(与推送协议约定一致):
  * 1. 先按白/黑名单过滤(白名单非空时只认白名单,否则排除黑名单);
  * 2. PLAYING 状态的会话优先;
  * 3. 同为 PLAYING(或都不在播放)时,取最近活跃的(见 Candidate.lastActiveAt);

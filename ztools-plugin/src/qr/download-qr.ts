@@ -10,6 +10,10 @@ import qrcode from 'qrcode-generator'
 export const APK_DOWNLOAD_URL =
   'https://github.com/Particaly/LyricCast/releases/latest/download/LyricCast.apk'
 
+/** GitHub Releases 最新版页面:releases/latest 与上面的固定资产同为永久重定向,
+ * 扫码不便时供浏览器进入手动下载;从 APK 地址推导,两处永远指向同一仓库 */
+export const RELEASE_PAGE_URL = APK_DOWNLOAD_URL.split('/releases/')[0] + '/releases/latest'
+
 /** 生成下载二维码 SVG(scalable,尺寸由 CSS 控制);内容超长等异常时返回空串。 */
 export function buildDownloadQrSvg(payload: string = APK_DOWNLOAD_URL): string {
   try {

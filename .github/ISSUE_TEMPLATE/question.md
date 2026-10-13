@@ -1,6 +1,6 @@
 ---
 name: Question / Support
-about: Ask a question or request support for Android Relay
+about: Ask a question or request support for LyricCast (词投)
 title: '[QUESTION] '
 labels: question
 assignees: ''
@@ -9,9 +9,9 @@ assignees: ''
 
 **Background context**
 Please provide information relevant to your setup:
-- Android TV Model:
-- MQTT Broker configuration:
-- Home Assistant `configuration.yaml` snippet for sensors:
+- Phone model & Android version:
+- PC OS & ZTools version:
+- App / Plugin Version:
 
 **Question**
 What would you like to know or what are you having trouble with?

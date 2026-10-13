@@ -41,6 +41,11 @@ class ConnectionUiStatusTest {
     }
 
     @Test
+    fun `exited text maps to exited`() {
+        assertEquals(ConnectionUiStatus.EXITED, ConnectionUi.from(false, "已退出"))
+    }
+
+    @Test
     fun `disabled text maps to needs access when listener access missing`() {
         assertEquals(
             ConnectionUiStatus.NEEDS_ACCESS,

@@ -58,7 +58,7 @@ export interface ServerEvent {
   artwork?: ArtworkData
 }
 
-/** docs/protocol.md v1.1 的 state/snapshot 消息(仅 UI 关心的字段;载荷同构) */
+/** 推送协议 v1.1 的 state/snapshot 消息(仅 UI 关心的字段;载荷同构) */
 export interface ProtocolStateMessage {
   type?: string
   seq: number

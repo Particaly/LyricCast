@@ -5,7 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 配对二维码 payload(docs/protocol.md §7)解析的纯逻辑测试。 */
+/** 配对二维码 payload 解析的纯逻辑测试。 */
 class PairingQrTest {
 
     private val token = "aBcDeFgHiJkLmNoPqRsTuVwx" // 24 位,与插件端生成格式一致

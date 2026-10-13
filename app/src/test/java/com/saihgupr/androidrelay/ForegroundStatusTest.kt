@@ -41,4 +41,9 @@ class ForegroundStatusTest {
     fun `enabled but service not started shows waiting`() {
         assertEquals("已保存 · 等待推送服务启动", ForegroundStatus.label(true, false, "未启用"))
     }
+
+    @Test
+    fun `exited text maps to exited notice`() {
+        assertEquals("已退出 · 后台运行已停止", ForegroundStatus.label(true, false, "已退出"))
+    }
 }

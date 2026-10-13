@@ -2,7 +2,7 @@
 <!--
   主界面(2026-10 改版):状态优先的单页结构 ——
   顶栏(标题+状态胶囊) → 连接英雄卡(光环状态点+大字状态+详情行+正在推送) →
-  条件式权限引导卡 → 扫码配对主入口 → 三张折叠卡(保活 / LAN / MQTT,标题带图标底座) → 版本页脚。
+  条件式权限引导卡 → 扫码配对主入口 → 两张折叠卡(LAN / 保活,标题带图标底座) → 版本页脚。
   所有文案来自 values/strings.xml;折叠/展开由 MainActivity 切换 body 可见性实现,
   状态点/胶囊/播放态胶囊的颜色由 MainActivity 按连接状态染色。
 -->
@@ -321,6 +321,225 @@
             android:text="@string/pair_hint"
             android:textColor="@color/text_hint"
             android:textSize="12sp" />
+
+        <!-- ==================== 局域网推送设置(折叠卡) ==================== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/lan_header"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="20dp"
+                android:paddingVertical="18dp"
+                android:background="?attr/selectableItemBackground">
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:background="@drawable/bg_icon_chip"
+                    android:contentDescription="@null"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_cast" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:text="@string/lan_section_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <View
+                    android:id="@+id/lan_header_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_dot"
+                    android:backgroundTint="@color/status_ok"
+                    android:visibility="gone" />
+
+                <ImageView
+                    android:id="@+id/lan_chevron"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_chevron"
+                    android:contentDescription="@null" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/lan_body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="20dp"
+                android:paddingBottom="20dp"
+                android:visibility="gone">
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/lan_enabled_switch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/lan_enabled_switch"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/lan_host_edit"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="14dp"
+                    android:background="@drawable/bg_input"
+                    android:hint="@string/lan_host_hint"
+                    android:inputType="text"
+                    android:paddingHorizontal="14dp"
+                    android:paddingVertical="0dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_hint"
+                    android:textSize="15sp" />
+
+                <EditText
+                    android:id="@+id/lan_port_edit"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_input"
+                    android:hint="@string/lan_port_hint"
+                    android:inputType="number"
+                    android:paddingHorizontal="14dp"
+                    android:paddingVertical="0dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_hint"
+                    android:textSize="15sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <EditText
+                        android:id="@+id/lan_token_edit"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_input"
+                        android:hint="@string/lan_token_hint"
+                        android:inputType="text"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="0dp"
+                        android:textColor="@color/text_primary"
+                        android:textColorHint="@color/text_hint"
+                        android:textSize="15sp" />
+
+                    <Button
+                        android:id="@+id/lan_regen_token_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="10dp"
+                        android:background="@drawable/bg_button_secondary"
+                        android:text="@string/lan_regen_token"
+                        android:textColor="@color/btn_secondary_text_selector"
+                        android:textSize="14sp"
+                        android:paddingHorizontal="16dp"
+                        android:stateListAnimator="@null"
+                        android:elevation="0dp" />
+                </LinearLayout>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/lan_artwork_switch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/lan_artwork_switch"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/lan_diagnostic_switch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/lan_diagnostic_switch"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/lan_blacklist_edit"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_input"
+                    android:hint="@string/lan_blacklist_hint"
+                    android:inputType="text"
+                    android:paddingHorizontal="14dp"
+                    android:paddingVertical="0dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_hint"
+                    android:textSize="15sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <Button
+                        android:id="@+id/lan_test_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:background="@drawable/bg_button_secondary"
+                        android:text="@string/lan_test_button"
+                        android:textColor="@color/btn_secondary_text_selector"
+                        android:textSize="14sp"
+                        android:paddingHorizontal="20dp"
+                        android:stateListAnimator="@null"
+                        android:elevation="0dp" />
+
+                    <TextView
+                        android:id="@+id/lan_status_text"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="14dp"
+                        android:text=""
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/lan_test_result_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text=""
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/lan_save_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="14dp"
+                    android:background="@drawable/bg_button_primary"
+                    android:text="@string/lan_save_button"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:stateListAnimator="@null"
+                    android:elevation="0dp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <!-- ==================== 后台保活(四项自检 + 分 ROM 引导) ==================== -->
         <LinearLayout
@@ -677,411 +896,29 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- ==================== 局域网推送设置(折叠卡) ==================== -->
-        <LinearLayout
+        <!-- ==================== 完整退出 / 重新启动(文案与行为随退出标记切换) ==================== -->
+        <Button
+            android:id="@+id/exit_button"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_button_secondary"
+            android:text="@string/exit_button"
+            android:textColor="@color/status_error"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:stateListAnimator="@null"
+            android:elevation="0dp" />
+
+        <TextView
+            android:id="@+id/exit_hint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:background="@drawable/bg_card"
-            android:orientation="vertical">
-
-            <LinearLayout
-                android:id="@+id/lan_header"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingHorizontal="20dp"
-                android:paddingVertical="18dp"
-                android:background="?attr/selectableItemBackground">
-
-                <ImageView
-                    android:layout_width="28dp"
-                    android:layout_height="28dp"
-                    android:background="@drawable/bg_icon_chip"
-                    android:contentDescription="@null"
-                    android:padding="6dp"
-                    android:src="@drawable/ic_cast" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="10dp"
-                    android:text="@string/lan_section_title"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <View
-                    android:id="@+id/lan_header_dot"
-                    android:layout_width="8dp"
-                    android:layout_height="8dp"
-                    android:layout_marginEnd="10dp"
-                    android:background="@drawable/bg_dot"
-                    android:backgroundTint="@color/status_ok"
-                    android:visibility="gone" />
-
-                <ImageView
-                    android:id="@+id/lan_chevron"
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_chevron"
-                    android:contentDescription="@null" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/lan_body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="20dp"
-                android:paddingBottom="20dp"
-                android:visibility="gone">
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/lan_enabled_switch"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/lan_enabled_switch"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="14sp" />
-
-                <EditText
-                    android:id="@+id/lan_host_edit"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="14dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="@string/lan_host_hint"
-                    android:inputType="text"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="0dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_hint"
-                    android:textSize="15sp" />
-
-                <EditText
-                    android:id="@+id/lan_port_edit"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="@string/lan_port_hint"
-                    android:inputType="number"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="0dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_hint"
-                    android:textSize="15sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <EditText
-                        android:id="@+id/lan_token_edit"
-                        android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_weight="1"
-                        android:background="@drawable/bg_input"
-                        android:hint="@string/lan_token_hint"
-                        android:inputType="text"
-                        android:paddingHorizontal="14dp"
-                        android:paddingVertical="0dp"
-                        android:textColor="@color/text_primary"
-                        android:textColorHint="@color/text_hint"
-                        android:textSize="15sp" />
-
-                    <Button
-                        android:id="@+id/lan_regen_token_button"
-                        android:layout_width="wrap_content"
-                        android:layout_height="44dp"
-                        android:layout_marginStart="10dp"
-                        android:background="@drawable/bg_button_secondary"
-                        android:text="@string/lan_regen_token"
-                        android:textColor="@color/btn_secondary_text_selector"
-                        android:textSize="14sp"
-                        android:paddingHorizontal="16dp"
-                        android:stateListAnimator="@null"
-                        android:elevation="0dp" />
-                </LinearLayout>
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/lan_artwork_switch"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/lan_artwork_switch"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="14sp" />
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/lan_diagnostic_switch"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/lan_diagnostic_switch"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="14sp" />
-
-                <EditText
-                    android:id="@+id/lan_blacklist_edit"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="@string/lan_blacklist_hint"
-                    android:inputType="text"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="0dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_hint"
-                    android:textSize="15sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <Button
-                        android:id="@+id/lan_test_button"
-                        android:layout_width="wrap_content"
-                        android:layout_height="44dp"
-                        android:background="@drawable/bg_button_secondary"
-                        android:text="@string/lan_test_button"
-                        android:textColor="@color/btn_secondary_text_selector"
-                        android:textSize="14sp"
-                        android:paddingHorizontal="20dp"
-                        android:stateListAnimator="@null"
-                        android:elevation="0dp" />
-
-                    <TextView
-                        android:id="@+id/lan_status_text"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="14dp"
-                        android:text=""
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/lan_test_result_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text=""
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
-
-                <Button
-                    android:id="@+id/lan_save_button"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="14dp"
-                    android:background="@drawable/bg_button_primary"
-                    android:text="@string/lan_save_button"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:stateListAnimator="@null"
-                    android:elevation="0dp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- ==================== MQTT · Home Assistant(折叠卡,高级) ==================== -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:background="@drawable/bg_card"
-            android:orientation="vertical">
-
-            <LinearLayout
-                android:id="@+id/mqtt_header"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="20dp"
-                android:paddingVertical="18dp"
-                android:background="?attr/selectableItemBackground">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <ImageView
-                        android:layout_width="28dp"
-                        android:layout_height="28dp"
-                        android:background="@drawable/bg_icon_chip"
-                        android:contentDescription="@null"
-                        android:padding="6dp"
-                        android:src="@drawable/ic_cloud" />
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="10dp"
-                        android:text="@string/mqtt_section_title"
-                        android:textColor="@color/text_primary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="10dp"
-                        android:background="@drawable/bg_input"
-                        android:paddingHorizontal="8dp"
-                        android:paddingVertical="3dp"
-                        android:text="@string/mqtt_section_badge"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="11sp" />
-
-                    <ImageView
-                        android:id="@+id/mqtt_chevron"
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
-                        android:src="@drawable/ic_chevron"
-                        android:contentDescription="@null" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/mqtt_section_subtitle"
-                    android:textColor="@color/text_hint"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/mqtt_body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="20dp"
-                android:paddingBottom="20dp"
-                android:visibility="gone">
-
-                <EditText
-                    android:id="@+id/mqtt_broker_edit"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="@string/mqtt_broker_hint"
-                    android:inputType="text"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="0dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_hint"
-                    android:textSize="15sp" />
-
-                <EditText
-                    android:id="@+id/mqtt_topic_edit"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/bg_input"
-                    android:hint="@string/mqtt_topic_hint"
-                    android:inputType="text"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="0dp"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_hint"
-                    android:textSize="15sp" />
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/mqtt_auth_switch"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="@string/mqtt_auth_switch"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="14sp" />
-
-                <LinearLayout
-                    android:id="@+id/mqtt_auth_container"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <EditText
-                        android:id="@+id/mqtt_username_edit"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="10dp"
-                        android:background="@drawable/bg_input"
-                        android:hint="@string/mqtt_username_hint"
-                        android:inputType="text"
-                        android:paddingHorizontal="14dp"
-                        android:paddingVertical="0dp"
-                        android:textColor="@color/text_primary"
-                        android:textColorHint="@color/text_hint"
-                        android:textSize="15sp" />
-
-                    <EditText
-                        android:id="@+id/mqtt_password_edit"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:layout_marginTop="10dp"
-                        android:background="@drawable/bg_input"
-                        android:hint="@string/mqtt_password_hint"
-                        android:inputType="textPassword"
-                        android:paddingHorizontal="14dp"
-                        android:paddingVertical="0dp"
-                        android:textColor="@color/text_primary"
-                        android:textColorHint="@color/text_hint"
-                        android:textSize="15sp" />
-                </LinearLayout>
-
-                <Button
-                    android:id="@+id/test_mqtt_button"
-                    android:layout_width="wrap_content"
-                    android:layout_height="44dp"
-                    android:layout_marginTop="16dp"
-                    android:background="@drawable/bg_button_secondary"
-                    android:text="@string/mqtt_test_button"
-                    android:textColor="@color/btn_secondary_text_selector"
-                    android:textSize="14sp"
-                    android:paddingHorizontal="20dp"
-                    android:stateListAnimator="@null"
-                    android:elevation="0dp" />
-
-                <TextView
-                    android:id="@+id/test_result_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text=""
-                    android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
-
-                <Button
-                    android:id="@+id/save_config_button"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="14dp"
-                    android:background="@drawable/bg_button_primary"
-                    android:text="@string/mqtt_save_button"
-                    android:textColor="@color/text_primary"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:stateListAnimator="@null"
-                    android:elevation="0dp" />
-            </LinearLayout>
-        </LinearLayout>
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="@string/exit_hint"
+            android:textColor="@color/text_hint"
+            android:textSize="12sp" />
 
         <!-- ==================== 版本页脚(文本由 MainActivity 按实际版本填入) ==================== -->
         <TextView

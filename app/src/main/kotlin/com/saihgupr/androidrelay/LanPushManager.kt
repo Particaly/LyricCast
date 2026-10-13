@@ -18,7 +18,7 @@ import kotlin.math.abs
 
 /**
  * LAN 推送的策略层:决定"何时发送什么",并把 [MediaInfo] 组装为协议消息
- * (docs/protocol.md v1)。底层连接见 [LanPushClient]。
+ * (推送协议 v1)。底层连接见 [LanPushClient]。
  *
  * 发送策略(协议 §4):
  * - track_change / playback_change / seek 立即发送;playing 时每 8 秒一次心跳快照;
@@ -109,9 +109,16 @@ class LanPushManager(private val context: Context) {
      * 启动管理器:读取设置,若 LAN 开关打开则持有保活锁、建立连接并启动心跳/ping 定时器。
      * 与服务 onCreate/onStartCommand 对齐;重复调用安全(锁复用、旧连接被重建、
      * 旧定时器先摘再挂),每次都会按当前持久化配置重新建连("保存并重连"的落点)。
+     * 用户已完整退出([AppExit])时仅对齐状态、绝不建连/拿锁 —— 这是退出语义的
+     * 最终防线,即使上游某条启动路径漏了关门也不会破坏"退出不再启动"。
      */
     fun start() {
         running = true
+        if (AppExit.isExited(context)) {
+            LanConnectionState.updateTrack(null)
+            LanConnectionState.update(false, "已退出")
+            return
+        }
         if (!LanSettings.isEnabled(context)) {
             // 开关刚关闭/服务重启时清掉残留的曲目展示,与"未启用"状态对齐
             LanConnectionState.updateTrack(null)
@@ -185,9 +192,6 @@ class LanPushManager(private val context: Context) {
     /**
      * 服务在每次媒体事件时调用:更新会话状态,重新选择 LAN 应跟随的会话,
      * 并按发送策略决定是否发出快照。
-     *
-     * 注意:MQTT 通道的上报在服务内独立完成,与本方法互不影响;
-     * 本方法早于/晚于 MQTT 去重逻辑都无妨(它没有早退语义)。
      *
      * @param info 本次事件构建的完整媒体信息
      * @param controller 对应的 MediaController,仅切歌时用于提取封面位图

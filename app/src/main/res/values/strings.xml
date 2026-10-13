@@ -6,7 +6,8 @@
 -->
 <resources>
     <string name="app_name">词投</string>
-    <string name="notification_stop">停止</string>
+    <!-- 通知栏动作即完整退出:停通道 + 移除常驻通知 + 不再自动重启(见 AppExit) -->
+    <string name="notification_stop">退出</string>
 
     <!-- 顶栏 -->
     <string name="header_subtitle">手机正在播放的歌，实时投到电脑</string>
@@ -18,6 +19,9 @@
     <string name="status_disabled">同步已关闭</string>
     <string name="status_need_access">需开启通知使用权</string>
     <string name="status_capsule_need_access">需通知使用权</string>
+    <string name="status_exited">已退出</string>
+    <string name="status_capsule_exited">已退出</string>
+    <string name="status_exited_hint">推送已停止，点击下方「重新启动推送」恢复同步</string>
     <string name="lan_target_text">正在同步到 %1$s:%2$d</string>
     <string name="lan_target_paused_text">已配对 %1$s:%2$d，打开「启用局域网推送」恢复同步</string>
     <string name="hero_detail_auth_failed">Token 校验未通过，请核对手机与电脑两端的配对 Token</string>
@@ -59,20 +63,6 @@
     <string name="lan_test_rejected">电脑端拒绝了连接（%1$s），请检查两端 Token 是否一致</string>
     <string name="lan_saved_toast">已保存，推送服务已重启</string>
     <string name="lan_pair_success">扫码配对成功：%1$s，正在连接…</string>
-
-    <!-- MQTT · Home Assistant(折叠卡,高级) -->
-    <string name="mqtt_section_title">MQTT · Home Assistant</string>
-    <string name="mqtt_section_badge">高级</string>
-    <string name="mqtt_section_subtitle">与局域网推送相互独立，可同时开启</string>
-    <string name="mqtt_broker_hint">Broker 地址（如 192.168.1.199）</string>
-    <string name="mqtt_topic_hint">Topic（如 android_tv/playback_state）</string>
-    <string name="mqtt_auth_switch">MQTT 用户名密码</string>
-    <string name="mqtt_username_hint">用户名</string>
-    <string name="mqtt_password_hint">密码</string>
-    <string name="mqtt_test_button">测试连接</string>
-    <string name="mqtt_save_button">保存并重启服务</string>
-    <string name="mqtt_saved_toast">MQTT 配置已保存，服务已重新初始化</string>
-    <string name="mqtt_test_init">正在初始化…</string>
 
     <!-- 前台服务与权限引导 -->
     <string name="notify_channel_name">后台播放推送</string>
@@ -143,6 +133,18 @@
     <string name="scan_need_camera">扫码需要相机权限，请授权后重试；也可以返回手动填写电脑地址</string>
     <string name="scan_no_camera">本设备没有可用的摄像头，请返回手动填写电脑地址与 Token</string>
     <string name="scan_camera_error">相机启动失败：%1$s</string>
+
+    <!-- 完整退出 / 重新启动(页底入口;退出同时落盘标记,重开应用不再自动后台运行) -->
+    <string name="exit_button">退出并停止后台运行</string>
+    <string name="exit_hint">停止推送、断开连接并移除常驻通知；之后重新打开词投也不会自动在后台运行</string>
+    <string name="exit_resume_button">重新启动推送</string>
+    <string name="exit_hint_exited">推送已完全停止。点击上方按钮恢复后台同步</string>
+    <string name="exit_confirm_title">退出并停止后台运行？</string>
+    <string name="exit_confirm_message">将断开与电脑的连接、停止后台服务并移除常驻通知，重新打开词投也不会自动恢复。\n\n提示：通知使用权的系统绑定无法由应用自行解除，如需彻底结束进程，请在系统设置 → 通知使用权中关闭词投。</string>
+    <string name="exit_confirm_ok">退出</string>
+    <string name="exit_confirm_cancel">取消</string>
+    <string name="exit_done_toast">已退出：推送已停止，常驻通知已移除</string>
+    <string name="exit_resume_toast">推送已重新启动</string>
 
     <!-- 页脚(版本号由 MainActivity 按 PackageManager 动态填入) -->
     <string name="footer_version">词投 v%1$s · 协议 v1</string>

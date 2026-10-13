@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import java.security.SecureRandom
 
 /**
- * LAN 推送通道的设置读写(独立于 MQTT 的 "mqtt_config",两条通道互不影响)。
+ * LAN 推送通道的设置读写("lan_config")。
  *
  * 所有方法均为轻量 SharedPreferences 读取;token 懒生成:首次读取时若无则生成
  * 24 位随机串并持久化,用户可在设置页重置。

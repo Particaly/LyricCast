@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 位置估算纯逻辑测试(docs/protocol.md 的 Android 端约定)。
+ * 位置估算纯逻辑测试(推送协议的 Android 端约定)。
  * PlaybackInfo 不依赖 Android 运行时,elapsedRealtime 由测试显式传入。
  */
 class PlaybackInfoTest {

@@ -1,8 +1,8 @@
 {
-  "name": "android-relay-tools",
+  "name": "lyriccast-tools",
   "version": "1.0.0",
   "private": true,
-  "description": "Dev tools for the android_relay LAN push channel (mock server / mock phone)",
+  "description": "Dev tools for the LyricCast LAN push channel (mock server / mock phone)",
   "type": "commonjs",
   "dependencies": {
     "ws": "^8.18.0"

@@ -1,5 +1,5 @@
 /**
- * 歌词模块公共类型(docs/protocol.md 之外的本插件内部契约)。
+ * 歌词模块公共类型(本插件内部契约)。
  */
 import type { VersionTag } from './clean-title'
 

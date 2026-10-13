@@ -140,7 +140,8 @@ watch(
     settings.desktopWidth,
     settings.desktopHeight,
     settings.desktopLineGap,
-    settings.desktopLineOffset
+    settings.desktopLineOffset,
+    settings.desktopCustomCss
   ],
   () => notifyStyleChanged()
 )
@@ -248,11 +249,11 @@ onUnmounted(() => {
         <!-- 空态引导 -->
         <section v-else class="hero">
           <div class="disc"><span>♪</span></div>
-          <h2 class="hero-title">手机正在播放,这里就有歌词</h2>
+          <h2 class="hero-title">已就绪,等待手机连接</h2>
           <div class="steps">
-            <span class="step"><i>1</i>手机安装 Android Relay</span>
+            <span class="step"><i>1</i>手机安装「词投」App</span>
             <span class="step"><i>2</i>同一 Wi-Fi 扫码配对</span>
-            <span class="step"><i>3</i>开启 LAN Push</span>
+            <span class="step"><i>3</i>开启局域网推送</span>
           </div>
           <div class="hero-hint">{{ statusText }}<template v-if="ui.serverError">:{{ ui.serverError }}</template></div>
           <button class="cta" @click="tab = 'settings'">前往设置 / 配对</button>

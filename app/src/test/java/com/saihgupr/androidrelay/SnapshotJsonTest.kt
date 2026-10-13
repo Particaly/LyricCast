@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 协议消息组装测试(任务书阶段 7:snapshot 构造;docs/protocol.md §2.3/§2.8)。 */
+/** 协议消息组装测试(snapshot 构造)。 */
 class SnapshotJsonTest {
 
     private fun track(id: String = "t1") = TrackInfo(

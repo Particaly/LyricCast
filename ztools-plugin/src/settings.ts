@@ -35,6 +35,8 @@ export interface Settings {
   desktopLineGap: number
   /** 桌面歌词行区垂直偏移(px):歌词块整体上下平移,正值下移;不设上下限 */
   desktopLineOffset: number
+  /** 桌面歌词自定义 CSS:原始样式注入悬浮歌词窗口,覆盖内置外观 */
+  desktopCustomCss: string
   /** 歌词来源:LRCLIB(主源)开关 */
   providerLrclib: boolean
   /** 歌词来源:网易云(中文回退)开关 */
@@ -67,6 +69,8 @@ export const DESKTOP_SIZE_RANGE = { minWidth: 360, maxWidth: 1600, minHeight: 96
 /** 桌面歌词行间距(px):当前句与预备句之间的额外垂直间距,负值收紧;
  * 下限保证开翻译时预备句不与译文文字重叠(悬浮窗为同值副本) */
 export const DESKTOP_LINE_GAP_RANGE = { min: -4, max: 32 }
+/** 自定义 CSS 长度上限(字符):防误粘贴超大文本撑爆推送负载与持久化 */
+export const DESKTOP_CUSTOM_CSS_MAX_LENGTH = 20_000
 export const MAIN_FONT_RANGE = { min: 12, max: 30 }
 
 const DEFAULTS: Settings = {
@@ -88,6 +92,7 @@ const DEFAULTS: Settings = {
   desktopHeight: 138,
   desktopLineGap: 0,
   desktopLineOffset: 0,
+  desktopCustomCss: '',
   mainFontSize: 16,
   translation: true,
   traditionalToSimplified: false
@@ -142,6 +147,10 @@ function sanitize(raw: unknown): Settings {
       DEFAULTS.desktopLineGap
     ),
     desktopLineOffset: finite(input.desktopLineOffset, DEFAULTS.desktopLineOffset),
+    desktopCustomCss:
+      typeof input.desktopCustomCss === 'string'
+        ? input.desktopCustomCss.slice(0, DESKTOP_CUSTOM_CSS_MAX_LENGTH)
+        : DEFAULTS.desktopCustomCss,
     mainFontSize: clamp(input.mainFontSize, MAIN_FONT_RANGE.min, MAIN_FONT_RANGE.max, DEFAULTS.mainFontSize),
     translation: typeof input.translation === 'boolean' ? input.translation : DEFAULTS.translation,
     traditionalToSimplified:

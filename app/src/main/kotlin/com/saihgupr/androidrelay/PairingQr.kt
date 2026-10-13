@@ -5,7 +5,7 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
 /**
- * 配对二维码 payload 的解析与构建(docs/protocol.md §7):
+ * 配对二维码 payload 的解析与构建:
  *
  * ```
  * androidrelay://pair?v=1&port=18765&ip=192.168.1.5&ip=192.168.1.8&token=xxxx

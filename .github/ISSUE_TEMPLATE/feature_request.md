@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea for Android Relay
+about: Suggest an idea for LyricCast (词投)
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''
@@ -11,7 +11,7 @@ assignees: ''
 A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
 
 **Describe the solution you'd like**
-A clear and concise description of what you want to happen. Consider UI/UX for the TV interface or performance/efficiency of the relay.
+A clear and concise description of what you want to happen. Consider UX for the phone app or the PC plugin.
 
 **Describe alternatives you've considered**
 A clear and concise description of any alternative solutions or features you've considered.

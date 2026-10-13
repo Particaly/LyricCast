@@ -12,7 +12,9 @@
  *   其余状态回落主行/副行占位文案;
  * - 进度条按推送锚点 + speed 本地插值(rAF),推送频率无需高;
  * - 整个胶囊为拖动区(-webkit-app-region),顶部居中悬停浮现快捷工具栏
- *   (字号±/翻译/锁定/背景不透明度/配色/关闭);锁定后禁止拖动、工具栏只留解锁;
+ *   (字号±/翻译/对齐/配色/校准/锁定/背景不透明度/关闭);锁定后禁止拖动、
+ *   工具栏只留解锁;「校」按钮展开校准面板,±100/±500ms 步进与复位经消息队列
+ *   由主窗口写入 OffsetStore(与设置页歌词校准同源,随推送回显当前生效偏移);
  * - 悬停 UI(描边/工具栏/缩放区)由主窗口轮询光标判定的 hovered 标志 js 驱动
  *   (胶囊是拖拽区,CSS :hover 不触发);描边在锁定态不显示;
  * - 悬停后胶囊边缘/四角变为缩放区(8 方位手势,对侧边固定),拖动调整宽高:
@@ -110,7 +112,7 @@ const subText = computed(() => {
     case 'offline':
       return '重连后自动恢复'
     default:
-      return '手机开启 LAN Push 后自动同步'
+      return '手机开启局域网推送后自动同步'
   }
 })
 
@@ -198,6 +200,29 @@ const windowHeight = computed(() => maxRowHeight.value + baseRowHeight.value + W
 /** 文本水平对齐:左对齐(默认,旧版观感)/ 居中 */
 const alignMode = computed(() => (desktopState.style.align === 'center' ? 'center' : 'left'))
 
+// ===== 自定义 CSS:主窗口推送的原始样式,注入 <style> 覆盖内置外观 =====
+// 注入节点挂在 document.head 末尾,排在构建产物的样式之后,同特异性规则后者胜;
+// 与 scoped 规则(.xxx[data-v-…],多一个属性选择器)对抗时需写 !important
+let customStyleEl: HTMLStyleElement | null = null
+
+watch(
+  () => desktopState.style.customCss,
+  (css) => {
+    if (!customStyleEl) {
+      customStyleEl = document.createElement('style')
+      customStyleEl.id = 'lyriccast-custom-css'
+      document.head.appendChild(customStyleEl)
+    }
+    customStyleEl.textContent = typeof css === 'string' ? css : ''
+  },
+  { immediate: true }
+)
+
+onUnmounted(() => {
+  customStyleEl?.remove()
+  customStyleEl = null
+})
+
 const containerOffset = ref(0)
 const animate = ref(true)
 
@@ -248,6 +273,30 @@ function onOpacityInput(event: Event) {
 function onOpacityCommit(event: Event) {
   const value = Number((event.target as HTMLInputElement).value)
   if (Number.isFinite(value)) desktopAction({ type: 'opacity', value })
+}
+
+// ===== 歌词校准:主窗口推送的生效偏移(已计入 activeIndex),面板经消息队列调整 =====
+/** 当前生效的手动校准偏移(ms,正值 = 歌词提前),由主窗口随推送下发并兜底 */
+const offsetMs = computed(() => {
+  const value = desktopState.offsetMs
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+})
+
+/** 校准写入的记忆维度提示(记住本曲/记住此应用),与设置页的 scope 选择同源 */
+const offsetScope = computed(() => (desktopState.offsetScope === 'app' ? 'app' : 'track'))
+
+/** 校准面板开关:悬浮结束或进入锁定态即收起(胶囊是拖拽区收不到点击,做不了点外关闭) */
+const calibOpen = ref(false)
+watch(
+  [hovered, locked],
+  ([hover, lock]) => {
+    if (!hover || lock) calibOpen.value = false
+  }
+)
+
+/** 偏移展示(±ms):负号用 U+2212,与面板步进按钮的减号字形一致 */
+function formatOffset(ms: number): string {
+  return ms === 0 ? '0' : `${ms > 0 ? '+' : '−'}${Math.abs(ms)}ms`
 }
 
 // ===== 胶囊尺寸:推送值兜底,拖动边缘/角落时本地即时预览 =====
@@ -458,6 +507,14 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
           >
             {{ themeLabel }}
           </button>
+          <button
+            class="ctl"
+            :class="{ on: calibOpen }"
+            :title="`歌词校准:当前 ${formatOffset(offsetMs)},正值 = 歌词提前`"
+            @click="calibOpen = !calibOpen"
+          >
+            校
+          </button>
           <button class="ctl wide" title="锁定歌词栏:禁止拖动与悬停操作" @click="desktopAction({ type: 'lock' })">
             锁定
           </button>
@@ -473,6 +530,27 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
             @change="onOpacityCommit"
           />
           <button class="ctl" title="关闭桌面歌词" @click="desktopAction({ type: 'close' })">✕</button>
+          <!-- 校准面板:挂在工具栏内随 hovered 一起显隐;步进经消息队列由主窗口写入
+               OffsetStore(与设置页 applyOffset 同源持久化),复位仅清零本曲记录 -->
+          <div v-if="calibOpen" class="calib">
+            <div class="calib-row">
+              <button class="ctl wide" title="歌词延后 500ms" @click="desktopAction({ type: 'offset', delta: -500 })">−0.5s</button>
+              <button class="ctl wide" title="歌词延后 100ms" @click="desktopAction({ type: 'offset', delta: -100 })">−0.1s</button>
+              <button class="ctl wide" title="歌词提前 100ms" @click="desktopAction({ type: 'offset', delta: 100 })">+0.1s</button>
+              <button class="ctl wide" title="歌词提前 500ms" @click="desktopAction({ type: 'offset', delta: 500 })">+0.5s</button>
+              <button
+                v-if="offsetMs !== 0"
+                class="ctl wide"
+                title="复位校准"
+                @click="desktopAction({ type: 'offset', delta: 0 })"
+              >
+                复位
+              </button>
+            </div>
+            <div class="calib-hint">
+              当前 {{ formatOffset(offsetMs) }} · 正值 = 歌词提前 · 记住{{ offsetScope === 'app' ? '此应用' : '本曲' }}
+            </div>
+          </div>
         </template>
         <button v-else class="ctl wide" title="解锁歌词栏" @click="desktopAction({ type: 'lock' })">解锁</button>
       </div>
@@ -759,6 +837,48 @@ function onResizeStart(event: PointerEvent, dir: DesktopResizeDir) {
   width: 78px;
   accent-color: #4f9cf9;
   cursor: pointer;
+}
+
+/* 校准面板:工具栏正下方悬浮。底色固定高不透明度,不随 --toolbar-alpha 走:
+   纯透明歌词模式(alpha 0)下面板会整个叠在歌词文字上,没有自己的底色就无法阅读;
+   投影把面板从背后亮色歌词文字里衬出来 */
+.calib {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-radius: 11px;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.stage.dark .calib {
+  background: rgba(17, 19, 26, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.stage.light .calib {
+  background: rgba(251, 252, 254, 0.95);
+  border: 1px solid rgba(15, 20, 30, 0.1);
+  box-shadow: 0 6px 20px rgba(15, 20, 30, 0.18);
+}
+
+.calib-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* 当前偏移与记忆维度的提示行:小号弱化,不与步进按钮抢注意力 */
+.calib-hint {
+  font-size: 11px;
+  opacity: 0.62;
 }
 
 /* 边缘/角落缩放区:平时不裁剪拖拽区(整窗可拖动);hovered 后才挖出 no-drag 孔

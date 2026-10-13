@@ -1,5 +1,5 @@
 /**
- * progress.ts 纯函数测试(docs/protocol.md v1.1 §5/§6.2/§6.3):
+ * progress.ts 纯函数测试:
  * 进度推算(playing/paused/变速/seek 覆盖/未知位置)、stale/宽限/断开状态机、
  * 快照覆盖语义。
  */

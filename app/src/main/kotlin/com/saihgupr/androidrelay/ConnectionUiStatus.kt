@@ -18,6 +18,12 @@ enum class ConnectionUiStatus(val shortLabel: String) {
     DISABLED("未启用"),
 
     /**
+     * 用户已执行「完整退出」([AppExit] 标记落盘):所有通道已停、不再自动重启。
+     * 与 DISABLED 的区别在于恢复动作不同 —— 后者去开开关,前者点「重新启动推送」。
+     */
+    EXITED("已退出"),
+
+    /**
      * 通知使用权未授权:监听服务不会被系统绑定,授权前连接无从建立。
      * 与 DISABLED 的区别在于修复动作不同 —— 前者去开开关,后者去授权。
      */
@@ -42,6 +48,7 @@ object ConnectionUi {
         listenerAccessGranted: Boolean = true
     ): ConnectionUiStatus = when {
         statusText.startsWith("认证失败") -> ConnectionUiStatus.AUTH_FAILED
+        statusText.startsWith("已退出") -> ConnectionUiStatus.EXITED
         statusText.startsWith("未启用") && !listenerAccessGranted -> ConnectionUiStatus.NEEDS_ACCESS
         statusText.startsWith("未启用") -> ConnectionUiStatus.DISABLED
         connected -> ConnectionUiStatus.CONNECTED

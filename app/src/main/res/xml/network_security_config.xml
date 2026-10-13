@@ -2,8 +2,7 @@
 <!--
   LAN 推送通过 ws:// 连接局域网内的 PC,属明文 HTTP 栈流量,targetSdk 28+ 默认禁止。
   networkSecurityConfig 无法按"用户动态输入的 IP"限定白名单,故这里对整个应用放开明文;
-  本应用除局域网 ws 外没有任何 HTTP 流量,MQTT 走原生 socket 不受此配置影响。
-  风险与适用范围见 docs/protocol.md §6 与 README。
+  本应用除局域网 ws 外没有任何 HTTP 流量。仅限可信局域网使用,不要映射到公网。
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">

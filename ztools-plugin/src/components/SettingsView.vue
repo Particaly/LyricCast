@@ -7,6 +7,7 @@ import { computed, ref } from 'vue'
 import qrcode from 'qrcode-generator'
 import { activeState, applyOffset, offsetUi, userOffset, ui } from '../store'
 import {
+  DESKTOP_CUSTOM_CSS_MAX_LENGTH,
   DESKTOP_FONT_RANGE,
   DESKTOP_LINE_GAP_RANGE,
   DESKTOP_OPACITY_RANGE,
@@ -17,7 +18,7 @@ import {
 } from '../settings'
 import { openDesktopDevTools, resetDesktopPosition } from '../desktop-bridge'
 import { buildPairingPayload } from '../qr/pair-qr'
-import { APK_DOWNLOAD_URL, buildDownloadQrSvg } from '../qr/download-qr'
+import { APK_DOWNLOAD_URL, RELEASE_PAGE_URL, buildDownloadQrSvg } from '../qr/download-qr'
 
 // ===== 桌面歌词 =====
 const THEME_OPTIONS: Array<{ value: DesktopTheme; label: string }> = [
@@ -96,23 +97,27 @@ function setActiveDevice(event: Event) {
   window.services.lanLyrics.setActiveDevice(value)
 }
 
+/** 写剪贴板:优先 ztools.copyText,不可用时退回 execCommand 兜底 */
+function copyPlainText(text: string) {
+  if (window.ztools?.copyText) {
+    window.ztools.copyText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
 function copyConfig() {
   const snapshotValue = ui.snapshot
   if (!snapshotValue) return
-  const text = `PC 地址:${primaryAddress.value}\n端口:${snapshotValue.port}\nToken:${snapshotValue.token}`
-  if (window.ztools?.copyText) {
-    window.ztools.copyText(text)
-  } else {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    document.body.appendChild(textarea)
-    textarea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textarea)
-  }
+  copyPlainText(`PC 地址:${primaryAddress.value}\n端口:${snapshotValue.port}\nToken:${snapshotValue.token}`)
 }
 
-// ===== 配对二维码(docs/protocol.md §7)=====
+// ===== 配对二维码 =====
 const showQr = ref(false)
 
 /** 当前配置对应的二维码 SVG(scalable,尺寸由 CSS 控制);内容超长等异常时为空串 */
@@ -130,19 +135,22 @@ const qrSvg = computed(() => {
 })
 
 // ===== 手机端下载二维码(指向 GitHub Releases 最新 APK,由 android-release.yml 发版)=====
-const showDownloadQr = ref(false)
+/** 下载地址二维码 SVG;生成异常时为空串 */
+const downloadQrSvg = computed(() => buildDownloadQrSvg())
 
-/** 下载地址二维码 SVG;展开时才计算,生成异常时为空串 */
-const downloadQrSvg = computed(() => (showDownloadQr.value ? buildDownloadQrSvg() : ''))
+const downloadTip = ref('')
 
-/** 复制下载链接,扫码不便时可在手机浏览器直接打开 */
-function copyDownloadUrl() {
-  const textarea = document.createElement('textarea')
-  textarea.value = APK_DOWNLOAD_URL
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  document.body.removeChild(textarea)
+/** 用系统默认浏览器打开 GitHub Releases 最新版页面;旧版 ZTools 没有
+ * shellOpenExternal 时降级为复制下载链接,由用户手动粘贴打开 */
+function openReleasePage() {
+  try {
+    if (window.ztools?.shellOpenExternal) {
+      window.ztools.shellOpenExternal(RELEASE_PAGE_URL)
+      return
+    }
+  } catch (_) { /* API 异常走降级 */ }
+  copyPlainText(APK_DOWNLOAD_URL)
+  downloadTip.value = '当前 ZTools 不支持直接打开浏览器,已复制下载链接'
 }
 
 // ===== 端口 / Token =====
@@ -199,7 +207,6 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">字号</div>
-            <div class="setting-hint">悬浮窗内的当前句大小</div>
           </div>
           <div class="stepper">
             <button @click="bumpFontSize('desktopFontSize', -2)">A−</button>
@@ -210,7 +217,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">行间距</div>
-            <div class="setting-hint">当前句与预备句的间隔,负值更紧;窗口高度随字号与行距自动加高</div>
+            <div class="setting-hint">负值更紧凑,窗口高度自动适应</div>
           </div>
           <div class="stepper">
             <button @click="bumpLineGap(-2)">−</button>
@@ -221,7 +228,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">垂直位置</div>
-            <div class="setting-hint">歌词块整体上下平移,正值下移;用于微调歌词在胶囊内的位置</div>
+            <div class="setting-hint">整体上下平移,正值下移</div>
           </div>
           <div class="stepper">
             <button @click="bumpLineOffset(-1)">−</button>
@@ -262,7 +269,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">对齐方式</div>
-            <div class="setting-hint">歌词文本水平对齐;也可在悬浮窗工具栏点「左/中」切换</div>
+            <div class="setting-hint">也可在悬浮窗工具栏切换</div>
           </div>
           <div class="segment">
             <button
@@ -282,7 +289,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">背景不透明度</div>
-            <div class="setting-hint">悬浮窗背景浓淡,0 为全透明(仅显示文字与进度)</div>
+            <div class="setting-hint">0 为全透明,仅显示文字</div>
           </div>
           <div class="stepper">
             <input
@@ -317,6 +324,23 @@ function regenerateToken() {
           </div>
           <button @click="resetDesktopPosition">恢复默认位置</button>
         </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <div class="setting-title">自定义 CSS</div>
+            <div class="setting-hint">
+              注入悬浮歌词窗口的原始样式,可改字体/颜色/圆角等;与内置样式冲突时加
+              !important,失焦即生效
+            </div>
+          </div>
+        </div>
+        <textarea
+          class="css-editor mono"
+          :maxlength="DESKTOP_CUSTOM_CSS_MAX_LENGTH"
+          :value="settings.desktopCustomCss"
+          spellcheck="false"
+          placeholder=".pill { border-radius: 20px; }"
+          @change="updateSettings({ desktopCustomCss: ($event.target as HTMLTextAreaElement).value })"
+        ></textarea>
       </template>
     </section>
 
@@ -325,8 +349,8 @@ function regenerateToken() {
       <h2>歌词显示</h2>
       <div class="setting-row">
         <div class="setting-label">
-          <div class="setting-title">主界面字号</div>
-          <div class="setting-hint">「歌词」页滚动歌词的基准字号</div>
+            <div class="setting-title">主界面字号</div>
+            <div class="setting-hint">「歌词」页滚动歌词的字号</div>
         </div>
         <div class="stepper">
           <button @click="bumpFontSize('mainFontSize', -1)">A−</button>
@@ -336,22 +360,22 @@ function regenerateToken() {
       </div>
       <div class="setting-row">
         <div class="setting-label">
-          <div class="setting-title">显示翻译</div>
-          <div class="setting-hint">当前句下方展示对应译文(来源提供翻译时)</div>
-        </div>
-        <label class="switch">
-          <input
-            type="checkbox"
-            :checked="settings.translation"
-            @change="updateSettings({ translation: ($event.target as HTMLInputElement).checked })"
-          />
+            <div class="setting-title">显示翻译</div>
+            <div class="setting-hint">当前句下方展示对应译文</div>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.translation"
+              @change="updateSettings({ translation: ($event.target as HTMLInputElement).checked })"
+            />
           <span class="track"></span>
         </label>
       </div>
       <div class="setting-row">
         <div class="setting-label">
-          <div class="setting-title">繁体转简体</div>
-          <div class="setting-hint">歌词判定为繁体时,经内置字表(OpenCC)逐字转为简体显示;日语歌词不转换</div>
+            <div class="setting-title">繁体转简体</div>
+            <div class="setting-hint">繁体歌词自动转为简体显示</div>
         </div>
         <label class="switch">
           <input
@@ -368,7 +392,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">歌词来源</div>
-            <div class="setting-hint">按查询语言自动排序(中文优先中文源);出错的来源会自动熔断 5 分钟</div>
+            <div class="setting-hint">中文歌优先中文源;出错的来源会自动暂停几分钟</div>
           </div>
         </div>
         <div class="setting-row">
@@ -388,7 +412,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">网易云音乐(中文回退)</div>
-            <div class="setting-hint">非官方接口,可能随时变动;失败自动回退不影响其他来源</div>
+            <div class="setting-hint">非官方接口,失败自动换用其他来源</div>
           </div>
           <label class="switch">
             <input
@@ -402,7 +426,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">酷狗音乐(中文补充)</div>
-            <div class="setting-hint">非官方接口,只有普通 LRC(无独立翻译);失败自动回退</div>
+            <div class="setting-hint">非官方接口,暂不支持翻译</div>
           </div>
           <label class="switch">
             <input
@@ -416,7 +440,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">lrcmux(聚合源)</div>
-            <div class="setting-hint">聚合 LRCLIB/Musixmatch/酷狗/Genius 等,LRCLIB 搜不到时兜底;无候选面板</div>
+            <div class="setting-hint">聚合多个来源,其他来源搜不到时兜底</div>
           </div>
           <label class="switch">
             <input
@@ -430,7 +454,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">Better Lyrics(TTML 逐字)</div>
-            <div class="setting-hint">海外众包歌词 API,热歌命中率高;未缓存的新歌可能要求 API key 而跳过</div>
+            <div class="setting-hint">海外众包歌词,英文热歌命中率高</div>
           </div>
           <label class="switch">
             <input
@@ -444,7 +468,7 @@ function regenerateToken() {
         <div class="setting-row">
           <div class="setting-label">
             <div class="setting-title">并行搜索所有来源</div>
-            <div class="setting-hint">同时请求各来源,高置信结果立即返回;关闭则按顺序逐个尝试</div>
+            <div class="setting-hint">同时请求所有来源,更快出结果;关闭则逐个尝试</div>
           </div>
           <label class="switch">
             <input
@@ -457,11 +481,8 @@ function regenerateToken() {
         </div>
         <div class="setting-row">
           <div class="setting-label">
-            <div class="setting-title">封面 API 兜底</div>
-            <div class="setting-hint">
-              手机未推送封面时,按曲名/歌手/专辑从 LrcAPI、MusicBrainz 封面艺术档案拉取;
-              播放器带内嵌封面时不受影响
-            </div>
+            <div class="setting-title">封面自动补图</div>
+            <div class="setting-hint">手机未推送封面时,自动按歌名/歌手在线补图</div>
           </div>
           <label class="switch">
             <input
@@ -541,7 +562,7 @@ function regenerateToken() {
       <div v-if="showQr" class="qr-block">
         <div class="qr" v-html="qrSvg"></div>
         <div class="muted hint">
-          手机 App → LAN Push → <b>Scan QR to Connect</b>,扫码自动填入地址与 Token。<br />
+          手机打开「词投」点「扫码配对」,扫这个码自动填入地址与 Token。<br />
           二维码含配对 Token,请勿截图外传。
         </div>
       </div>
@@ -559,23 +580,20 @@ function regenerateToken() {
         </div>
       </template>
       <div class="muted hint">
-        无摄像头/扫码不便时,也可在手机 App「Android Relay → LAN Push」中手动填入地址与 Token
+        没有摄像头或扫码不便时,可在手机「词投」的「局域网推送设置」中手动填写电脑地址与 Token
       </div>
     </section>
 
     <!-- ===== 手机端 ===== -->
     <section class="card">
       <h2>手机端</h2>
-      <div class="muted hint">Android 客户端安装包随 CI 发版更新,二维码始终指向最新 Release。</div>
-      <div class="button-row">
-        <button @click="showDownloadQr = !showDownloadQr">
-          {{ showDownloadQr ? '隐藏二维码' : '下载二维码' }}
-        </button>
-        <button @click="copyDownloadUrl">复制下载链接</button>
-      </div>
-      <div v-if="showDownloadQr" class="qr-block">
+      <div class="qr-block">
         <div class="qr" v-html="downloadQrSvg"></div>
         <div class="muted hint">手机相机扫码直接下载安装包,无需配对。</div>
+      </div>
+      <div class="button-row">
+        <button title="在系统默认浏览器中打开 GitHub Releases 页面" @click="openReleasePage">打开下载页</button>
+        <span v-if="downloadTip" class="muted small">{{ downloadTip }}</span>
       </div>
     </section>
 
@@ -596,9 +614,7 @@ function regenerateToken() {
     <section class="card">
       <h2>关于</h2>
       <div class="muted small about-line">
-        词投 LyricCast v0.4.0 · 手机 <b>android_relay</b> 推送播放状态,PC 侧匹配并滚动展示歌词<br />
-        歌词来源:LRCLIB(主源)+ 网易云(中文回退,非官方接口);优先使用带时间轴的逐行歌词,
-        匹配不到时降级为纯文本
+        词投 LyricCast v0.4.0 · 手机端「词投」App 推送播放状态,电脑端匹配并滚动展示歌词
       </div>
     </section>
   </div>
@@ -803,6 +819,28 @@ function regenerateToken() {
 
 .mono {
   font-family: ui-monospace, Consolas, monospace;
+}
+
+/* 自定义 CSS 编辑区:等宽多行输入,失焦提交(updateSettings 持久化并立即重推悬浮窗) */
+.css-editor {
+  width: 100%;
+  min-height: 96px;
+  max-height: 320px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(125, 135, 155, 0.35));
+  background: transparent;
+  color: inherit;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.css-editor:focus {
+  outline: 1px solid #4f9cf9;
 }
 
 .muted {

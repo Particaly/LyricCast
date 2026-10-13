@@ -9,8 +9,7 @@ import android.media.session.PlaybackState
  *
  * 兼容性说明(实测各音乐 App 元数据质量参差,读取必须健壮、绝不抛异常):
  * - artist 为空是常见情况(部分 App 只填 albumArtist 或把 "歌名 - 歌手" 整个塞进 title),
- *   读取时 artist 为空会回退到 albumArtist,仅影响 LAN 通道;MQTT 的 artist 字段保持原始
- *   METADATA_KEY_ARTIST 不变;
+ *   读取时 artist 为空会回退到 albumArtist,LAN 通道按"尽量非空"的 artist 推送;
  * - 封面可能以位图(ALBUM_ART/ART/DISPLAY_ICON)或 URI(ALBUM_ART_URI/ART_URI/DISPLAY_ICON_URI)
  *   两种形式存在,这里只探测"是否存在",位图本体由发送方按需提取,避免每次回调解码大图;
  * - metadata / playbackState 任一为 null 都不会失败,相应字段用安全默认值填充。
@@ -33,7 +32,7 @@ object MediaMetadataReader {
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""
         val rawArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
         val albumArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST) ?: ""
-        // LAN 通道使用"尽量非空"的 artist;MQTT 保持原始值(见类注释)
+        // LAN 通道使用"尽量非空"的 artist(见类注释)
         val artist = rawArtist.ifBlank { albumArtist }
         val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
         val durationMs = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L

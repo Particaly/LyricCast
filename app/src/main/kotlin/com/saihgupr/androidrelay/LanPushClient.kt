@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * LAN 推送的底层 WebSocket 客户端(手机 → PC,协议见 docs/protocol.md)。
+ * LAN 推送的底层 WebSocket 客户端(手机 → PC)。
  *
  * 职责仅限:建连、自动重连(指数退避 1s→2s→…封顶 30s)、网络恢复/亮屏解锁立即重试、
  * 收发文本帧。协议语义(hello/state/snapshot/artwork/… )由上层 [LanPushManager] 处理。

@@ -4,10 +4,7 @@ import java.security.MessageDigest
 import java.util.Locale
 
 /**
- * 播放状态枚举,取值与 LAN 推送协议(docs/protocol.md v1)中的 playback.state 字段一一对应。
- *
- * 注意:MQTT 通道沿用旧的字符串映射(playing/paused/buffering/idle,stopped 与 none 归并为
- * idle),该映射仍留在 MediaSessionListenerService 中,与本枚举互不影响。
+ * 播放状态枚举,取值与 LAN 推送协议中的 playback.state 字段一一对应。
  *
  * [fromSessionState] 中引用的 PlaybackState.STATE_* 均为编译期内联的静态常量,
  * 因此本模块可在纯 JVM 单元测试中运行,无需 Robolectric。
@@ -98,7 +95,7 @@ data class PlaybackInfo(
     /**
      * 估算"当前时刻"的播放位置,供 LAN 推送组装与 PC 端插值对齐。
      *
-     * 规则(与 docs/protocol.md 一致):
+     * 规则(与推送协议一致):
      * - position 未知时返回 null,调用方必须原样上报 positionKnown=false,不得伪造;
      * - 非 PLAYING 状态直接返回锚点位置(暂停/停止时位置不前进);
      * - PLAYING 时 est = position + (now - updateTime) * speed,并夹到 [0, duration]

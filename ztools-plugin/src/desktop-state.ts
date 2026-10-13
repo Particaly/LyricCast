@@ -31,6 +31,8 @@ export interface DesktopState {
     lineGap: number
     /** 行区垂直偏移(px):歌词块整体上下平移,正值下移 */
     lineOffset: number
+    /** 自定义 CSS:主窗口推送的原始样式,注入 <style> 覆盖内置外观 */
+    customCss: string
   }
   status: DesktopStatus
   track: { title: string; artist: string } | null
@@ -42,6 +44,10 @@ export interface DesktopState {
   activeIndex: number
   /** 歌词内容版本号:行快照被整体替换(切歌/重新匹配)时自增,用于区分轨道重建与行推进 */
   linesVersion: number
+  /** 当前生效的手动校准偏移(ms,正值 = 歌词提前,已计入 activeIndex):校准面板展示用 */
+  offsetMs: number
+  /** 校准偏移的记忆维度(记住本曲/记住此应用):工具栏调整由主窗口写入此维度 */
+  offsetScope: 'track' | 'app'
   progress: {
     atMs: number
     positionMs: number
@@ -53,13 +59,15 @@ export interface DesktopState {
 
 export const desktopState = reactive<DesktopState>({
   hovered: false,
-  style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138, lineGap: 0, lineOffset: 0 },
+  style: { fontSize: 26, theme: 'auto', align: 'left', translation: true, locked: false, opacity: 90, width: 870, height: 138, lineGap: 0, lineOffset: 0, customCss: '' },
   status: 'noplayback',
   track: null,
   lines: [],
   translations: [],
   activeIndex: -1,
   linesVersion: 0,
+  offsetMs: 0,
+  offsetScope: 'track',
   progress: null
 })
 
@@ -78,15 +86,18 @@ export function applyDesktopState(payload: DesktopPush): void {
       ? payload.activeIndex
       : -1
   desktopState.linesVersion = typeof payload.linesVersion === 'number' ? payload.linesVersion : 0
+  desktopState.offsetMs =
+    typeof payload.offsetMs === 'number' && Number.isFinite(payload.offsetMs) ? payload.offsetMs : 0
+  desktopState.offsetScope = payload.offsetScope === 'app' ? 'app' : 'track'
   desktopState.progress = payload.progress ?? null
 }
 
 /** 悬浮窗缩放方位:n/s/e/w 为四边,nw/ne/sw/se 为四角 */
 export type DesktopResizeDir = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se'
 
-/** 悬浮窗工具栏动作消息;delta 仅 font,value 仅 opacity,align 等开关类无参,size/dir 仅 resize 使用 */
+/** 悬浮窗工具栏动作消息;delta 仅 font/offset,value 仅 opacity,align 等开关类无参,size/dir 仅 resize 使用 */
 export interface DesktopActionMessage {
-  type: 'font' | 'theme' | 'close' | 'translation' | 'align' | 'lock' | 'opacity' | 'resize'
+  type: 'font' | 'theme' | 'close' | 'translation' | 'align' | 'lock' | 'opacity' | 'resize' | 'offset'
   delta?: number
   value?: number
   /** resize:目标胶囊尺寸(px,窗口 = 胶囊 + 四周各 5px 留白) */
