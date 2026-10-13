@@ -1,11 +1,11 @@
 # 词投 LyricCast（ZTools 插件）
 
 > 手机正在播放的歌，电脑上同步滚动歌词 + 桌面悬浮歌词。
-> 配套 Android 端：[词投 LyricCast](../README.md)。
+> 配套 Android 端：[词投 LyricCast](https://github.com/Particaly/LyricCast)。
 
 | 实时歌词 | 桌面悬浮歌词 |
 |---|---|
-| <img src="../Images/plugin-lyrics.png" alt="实时歌词" width="420"> | <img src="../Images/plugin-desktop.png" alt="桌面悬浮歌词" width="420"> |
+| <img src="https://raw.githubusercontent.com/Particaly/LyricCast/main/Images/plugin-lyrics.png" alt="实时歌词" width="420"> | <img src="https://raw.githubusercontent.com/Particaly/LyricCast/main/Images/plugin-desktop.png" alt="桌面悬浮歌词" width="420"> |
 
 ## ✨ 功能
 
