@@ -11,8 +11,8 @@ android {
         applicationId "com.saihgupr.androidrelay"
         minSdk 21
         targetSdk 34
-        versionCode 10
-        versionName "1.4.2"
+        versionCode 11
+        versionName "1.4.3"
     }
 
     // CI 发版签名(android-release.yml 通过 -P 注入四个属性);任一缺失则不挂签名,
